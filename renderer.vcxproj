@@ -78,8 +78,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>C:\Users\joela\dev\libs\VulkanSDK\1.1.130.0\Include;C:\Users\joela\dev\projects;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\Users\joela\dev\libs\VulkanSDK\1.1.130.0\Lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(dev_path)\lib\VulkanSDK\1.1.130.0\Include;$(dev_path)\pro;$(IncludePath)</IncludePath>
+    <LibraryPath>$(dev_path)\lib\VulkanSDK\1.1.130.0\Lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
