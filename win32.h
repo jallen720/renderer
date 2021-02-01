@@ -164,7 +164,8 @@ static Platform *create_platform(CTK_Stack *stack) {
 }
 
 static void process_events(Window *window) {
-    window->open = GetMessage(&window->msg, NULL, 0, 0); // Stay open as long as WM_QUIT message isn't generated.
+    window->open = GetMessage(&window->msg, window->handle, 0, 0); // Stay open as long as WM_QUIT message isn't generated.
+
     if (!window->open)
         return;
 
