@@ -56,12 +56,12 @@ struct WindowInfo {
 
 struct Window {
     HWND handle;
-    MSG msg;
     bool open;
     bool key_down[INPUT_KEY_COUNT];
 };
 
 struct Platform {
+    HINSTANCE instance;
     Window *window;
     s32 key_map[INPUT_KEY_COUNT];
 };
@@ -123,27 +123,30 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
     return DefWindowProc(hwnd, msg, w_param, l_param);
 }
 
-static Window *create_window(CTK_Stack *stack, WindowInfo info) {
-    auto window = ctk_alloc<Window>(stack, 1);
-    window->open = true;
-    HINSTANCE h_instance = GetModuleHandle(NULL);
+static Window *create_window(CTK_Stack *stack, Platform *platform, WindowInfo info) {
+    static wchar_t const *CLASS_NAME = L"win32_window";
+
     WNDCLASS win_class = {};
     win_class.lpfnWndProc = window_callback;
-    win_class.hInstance = h_instance;
-    win_class.lpszClassName = L"win32_window";
+    win_class.hInstance = platform->instance;
+    win_class.lpszClassName = CLASS_NAME;
     RegisterClass(&win_class);
+
+    auto window = ctk_alloc<Window>(stack, 1);
+    window->open = true;
     window->handle = CreateWindowEx(0,                       // Optional window styles.
-                                    L"win32_window",         // Window class
+                                    CLASS_NAME,              // Window class
                                     info.title,              // Window text
                                     WS_OVERLAPPEDWINDOW,     // Window style
                                     info.x, info.y,          // Position
                                     info.width, info.height, // Size
                                     NULL,                    // Parent window
                                     NULL,                    // Menu
-                                    h_instance,              // Instance handle
+                                    platform->instance,      // Instance handle
                                     NULL);                   // Additional application data
     if (window->handle == NULL)
         CTK_FATAL("failed to create window")
+
     ShowWindow(window->handle, SW_SHOW);
     ctk_push(&active_windows, { window->handle, window });
     return window;
@@ -151,11 +154,12 @@ static Window *create_window(CTK_Stack *stack, WindowInfo info) {
 
 static Platform *create_platform(CTK_Stack *stack) {
     auto platform = ctk_alloc<Platform>(stack, 1);
+    platform->instance = GetModuleHandle(NULL);
 
     // Window
     WindowInfo window_info = PLATFORM_DEFAULT_WINDOW_INFO;
     window_info.title = L"Renderer";
-    platform->window = create_window(stack, window_info);
+    platform->window = create_window(stack, platform, window_info);
 
     // Map Keys
     #include "renderer/win32_keymap.h"
@@ -164,13 +168,13 @@ static Platform *create_platform(CTK_Stack *stack) {
 }
 
 static void process_events(Window *window) {
-    window->open = GetMessage(&window->msg, window->handle, 0, 0); // Stay open as long as WM_QUIT message isn't generated.
-
+    MSG msg;
+    window->open = GetMessage(&msg, window->handle, 0, 0); // Stay open as long as WM_QUIT message isn't generated.
     if (!window->open)
         return;
 
-    TranslateMessage(&window->msg);
-    DispatchMessage(&window->msg);
+    TranslateMessage(&msg);
+    DispatchMessage(&msg);
 }
 
 static bool key_down(Platform *platform, s32 core_key) {
