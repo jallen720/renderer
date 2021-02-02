@@ -6,7 +6,7 @@
 s32 main() {
     Core *core = create_core();
     Platform *platform = create_platform(&core->mem.perma);
-    Vulkan *vulkan = create_vulkan(core);
+    Vulkan* vulkan = create_vulkan(core, platform);
 
     // Main Loop
     while (platform->window->open) {
@@ -16,6 +16,7 @@ s32 main() {
             break;
 
         // ...
+
     }
 
     return 0;
