@@ -218,18 +218,19 @@ static void load_device(Vulkan *vk, CTK_Stack *stack) {
     ctk_end_region(stack, fn_region);
 }
 
-static void create_swapchain(Vulkan *vk, CTK_Stack *stack) {
-    // u32 fn_region = ctk_begin_region(stack);
+static void create_swapchain(Vulkan *vk, Memory *mem) {
+    // u32 fn_region = ctk_begin_region(&mem->temp);
 
     // ////////////////////////////////////////////////////////////
     // /// Configuration
     // ////////////////////////////////////////////////////////////
 
     // // Configure swapchain based on surface properties.
-    // auto surface_fmts = load_vk_objects<VkSurfaceFormatKHR>(stack, vkGetPhysicalDeviceSurfaceFormatsKHR,
-    //                                                         device->physical, surface);
-    // auto surface_present_modes = load_vk_objects<VkPresentModeKHR>(stack, vkGetPhysicalDeviceSurfacePresentModesKHR,
-    //                                                                device->physical, surface);
+    // auto surface_fmts =
+    //     load_vk_objects<VkSurfaceFormatKHR>(&mem->temp, vkGetPhysicalDeviceSurfaceFormatsKHR, device->physical, surface);
+    // auto surface_present_modes =
+    //     load_vk_objects<VkPresentModeKHR>(&mem->temp, vkGetPhysicalDeviceSurfacePresentModesKHR, device->physical,
+    //                                       surface);
     // VkSurfaceCapabilitiesKHR surface_capabilities = {};
     // vtk_validate_result(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->physical, surface, &surface_capabilities),
     //                     "failed to get physical device surface capabilities");
@@ -310,9 +311,11 @@ static void create_swapchain(Vulkan *vk, CTK_Stack *stack) {
     // ////////////////////////////////////////////////////////////
     // /// Image View Creation
     // ////////////////////////////////////////////////////////////
-    // CTK_StaticArray<VkImage, 4> swapchain_images = {};
-    // vtk_load_vk_objects(&swapchain_images, vkGetSwapchainImagesKHR, vk->device.handle, swapchain.handle);
-    // swapchain.image_count = swapchain_images.count;
+    // auto swapchain_images = load_vk_objects<VkImage>(&mem->temp, vkGetSwapchainImagesKHR, vk->device.handle,
+    //                                                  swapchain.handle);
+    // swapchain.image_views = ctk_create_array_full<VkImageView>(&mem->free_list, swapchain_images.count);
+
+    // swapchain.image_views = ctk_create_array_full(ctk_alloc<VkImageView>(&mem->free_list, swapchain_images.count));
     // for (u32 i = 0; i < swapchain_images.count; ++i) {
     //     VkImageViewCreateInfo view_info = {};
     //     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -333,7 +336,7 @@ static void create_swapchain(Vulkan *vk, CTK_Stack *stack) {
     //                         "failed to create image view");
     // }
 
-    // ctk_end_region(stack, fn_region);
+    // ctk_end_region(&mem->temp, fn_region);
 }
 
 static Vulkan *create_vulkan(Core *core, Platform *platform) {
