@@ -60,7 +60,7 @@ static void init_instance(Instance *instance, CTK_Stack *stack) {
     debug_messenger_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     debug_messenger_info.pNext = NULL;
     debug_messenger_info.flags = 0;
-    debug_messenger_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+    debug_messenger_info.messageSeverity = // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
                                            // VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
                                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -168,18 +168,17 @@ static void load_device(Vulkan *vk, CTK_Stack *stack) {
                 queue_fam_idxs.present = queue_fam_idx;
         }
 
-        if (queue_fam_idxs.graphics == CTK_U32_MAX || queue_fam_idxs.present == CTK_U32_MAX)
-            goto loop_end;
+        if (queue_fam_idxs.graphics != CTK_U32_MAX && queue_fam_idxs.present != CTK_U32_MAX) {
+            // Physical device found; initialize.
+            phys_device_found = true;
+            vk->device.physical.handle = phys_device;
+            vk->device.queue_fam_idxs = queue_fam_idxs;
+            vkGetPhysicalDeviceProperties(vk->device.physical.handle, &vk->device.physical.props);
+            vkGetPhysicalDeviceMemoryProperties(vk->device.physical.handle, &vk->device.physical.mem_props);
+            vk->device.physical.depth_img_fmt = vtk_find_depth_image_format(vk->device.physical.handle);
+            ctk_print_line("selected device: %s", vk->device.physical.props.deviceName);
+        }
 
-        // Physical device found; initialize.
-        phys_device_found = true;
-        vk->device.physical.handle = phys_device;
-        vk->device.queue_fam_idxs = queue_fam_idxs;
-        vkGetPhysicalDeviceProperties(vk->device.physical.handle, &vk->device.physical.props);
-        vkGetPhysicalDeviceMemoryProperties(vk->device.physical.handle, &vk->device.physical.mem_props);
-        vk->device.physical.depth_img_fmt = vtk_find_depth_image_format(vk->device.physical.handle);
-
-    loop_end:
         ctk_end_region(stack, loop_region);
     }
 
