@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include "ctk/ctk.h"
 #include "vtk/vtk.h"
+#include "vtk/device_features.h"
 #include "renderer/core.h"
 #include "renderer/platform.h"
 
@@ -16,15 +17,17 @@ struct QueueFamilyIndexes {
     u32 present;
 };
 
+struct PhysicalDevice {
+    VkPhysicalDevice handle;
+    QueueFamilyIndexes queue_fam_idxs;
+    VkPhysicalDeviceFeatures feats;
+    VkPhysicalDeviceProperties props;
+    VkPhysicalDeviceMemoryProperties mem_props;
+    VkFormat depth_img_fmt;
+};
+
 struct Device {
     VkDevice handle;
-    QueueFamilyIndexes queue_fam_idxs;
-    struct {
-        VkPhysicalDevice handle;
-        VkPhysicalDeviceProperties props;
-        VkPhysicalDeviceMemoryProperties mem_props;
-        VkFormat depth_img_fmt;
-    } physical;
     struct {
         VkQueue graphics;
         VkQueue present;
@@ -42,10 +45,11 @@ struct Swapchain {
 struct Vulkan {
     Instance instance;
     VkSurfaceKHR surface;
+    PhysicalDevice physical_device;
     Device device;
 };
 
-static void init_instance(Instance *instance, CTK_Stack *stack) {
+static void create_instance(Instance *instance, CTK_Stack *stack) {
     u32 fn_region = ctk_begin_region(stack);
     auto extensions = ctk_create_array<cstr>(stack, 16);
     auto layers = ctk_create_array<cstr>(stack, 16);
@@ -114,89 +118,114 @@ static VkSurfaceKHR get_surface(Instance *instance, Platform *platform) {
     return surface;
 }
 
-static VkDeviceQueueCreateInfo default_queue_info(u32 queue_fam_idx) {
-    static f32 const QUEUE_PRIORITIES[] = { 1.0f };
-
-    VkDeviceQueueCreateInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    info.flags = 0;
-    info.queueFamilyIndex = queue_fam_idx;
-    info.queueCount = CTK_ARRAY_COUNT(QUEUE_PRIORITIES);
-    info.pQueuePriorities = QUEUE_PRIORITIES;
-
-    return info;
-}
-
-template<typename Object, typename Loader, typename ...Args>
-static CTK_Array<Object> load_vk_objects(CTK_Stack *stack, Loader loader, Args... args) {
-    u32 count = 0;
-    loader(args..., &count, NULL);
-    CTK_ASSERT(count > 0);
-    auto vk_objects = ctk_create_array_full<Object>(stack, count);
-    loader(args..., &vk_objects.count, vk_objects.data);
-    return vk_objects;
-}
-
-static void load_device(Vulkan *vk, CTK_Stack *stack) {
+static QueueFamilyIndexes find_queue_family_idxs(VkPhysicalDevice physical_device, Vulkan *vk, CTK_Stack *stack) {
     u32 fn_region = ctk_begin_region(stack);
 
-    ////////////////////////////////////////////////////////////
-    /// Physical
-    ////////////////////////////////////////////////////////////
-    auto phys_devices = load_vk_objects<VkPhysicalDevice>(stack, vkEnumeratePhysicalDevices, vk->instance.handle);
+    QueueFamilyIndexes queue_fam_idxs = { CTK_U32_MAX, CTK_U32_MAX };
+    auto queue_fam_props_array =
+        vtk_load_vk_objects<VkQueueFamilyProperties>(stack, vkGetPhysicalDeviceQueueFamilyProperties, physical_device);
 
-    // Find suitable device for graphics/present.
-    bool phys_device_found = false;
-    for (u32 i = 0; !phys_device_found && i < phys_devices.count; ++i) {
-        u32 loop_region = ctk_begin_region(stack);
-        VkPhysicalDevice phys_device = phys_devices[i];
+    for (u32 queue_fam_idx = 0; queue_fam_idx < queue_fam_props_array.count; ++queue_fam_idx) {
+        VkQueueFamilyProperties *queue_fam_props = queue_fam_props_array + queue_fam_idx;
+        if (queue_fam_props->queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            queue_fam_idxs.graphics = queue_fam_idx;
 
-        // Check for queue families that support graphics and present.
-        QueueFamilyIndexes queue_fam_idxs = { CTK_U32_MAX, CTK_U32_MAX };
-
-        auto queue_fam_props_arr =
-            load_vk_objects<VkQueueFamilyProperties>(stack, vkGetPhysicalDeviceQueueFamilyProperties, phys_device);
-
-        for (u32 queue_fam_idx = 0; queue_fam_idx < queue_fam_props_arr.count; ++queue_fam_idx) {
-            VkQueueFamilyProperties *queue_fam_props = queue_fam_props_arr + queue_fam_idx;
-            if (queue_fam_props->queueFlags & VK_QUEUE_GRAPHICS_BIT)
-                queue_fam_idxs.graphics = queue_fam_idx;
-
-            VkBool32 present_supported = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(phys_device, queue_fam_idx, vk->surface, &present_supported);
-            if (present_supported == VK_TRUE)
-                queue_fam_idxs.present = queue_fam_idx;
-        }
-
-        if (queue_fam_idxs.graphics != CTK_U32_MAX && queue_fam_idxs.present != CTK_U32_MAX) {
-            // Physical device found; initialize.
-            phys_device_found = true;
-            vk->device.physical.handle = phys_device;
-            vk->device.queue_fam_idxs = queue_fam_idxs;
-            vkGetPhysicalDeviceProperties(vk->device.physical.handle, &vk->device.physical.props);
-            vkGetPhysicalDeviceMemoryProperties(vk->device.physical.handle, &vk->device.physical.mem_props);
-            vk->device.physical.depth_img_fmt = vtk_find_depth_image_format(vk->device.physical.handle);
-            ctk_print_line("selected device: %s", vk->device.physical.props.deviceName);
-        }
-
-        ctk_end_region(stack, loop_region);
+        VkBool32 present_supported = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_fam_idx, vk->surface, &present_supported);
+        if (present_supported == VK_TRUE)
+            queue_fam_idxs.present = queue_fam_idx;
     }
 
-    if (!phys_device_found)
-        CTK_FATAL("failed to find suitable physical device");
+    ctk_end_region(stack, fn_region);
+    return queue_fam_idxs;
+}
 
-    ////////////////////////////////////////////////////////////
-    /// Logical
-    ////////////////////////////////////////////////////////////
+static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<PhysicalDevice *> *physical_devices,
+                                                     VTK_PhysicalDeviceFeatures *requested_features) {
+    PhysicalDevice *suitable_device = NULL;
+
+    for (u32 i = 0; suitable_device == NULL && i < physical_devices->count; ++i) {
+        PhysicalDevice *physical_device = physical_devices->data[i];
+
+        // Check for queue families that support graphics and present.
+        bool has_required_queue_families = physical_device->queue_fam_idxs.graphics != CTK_U32_MAX &&
+                                           physical_device->queue_fam_idxs.present  != CTK_U32_MAX;
+
+        // Check that all requested features are supported.
+        VTK_PhysicalDeviceFeatures unsupported_features = {};
+
+        for (u32 feat_idx = 0; feat_idx < requested_features->count; ++feat_idx) {
+            s32 requested_feature = requested_features->data[feat_idx];
+            if (!vtk_physical_device_feature_supported(requested_feature, &physical_device->feats))
+                ctk_push(&unsupported_features, requested_feature);
+        }
+
+        bool requested_features_supported = unsupported_features.count == 0;
+
+        // Check if device passes all tests and load more physical_device about device if so.
+        if (has_required_queue_families && requested_features_supported)
+            suitable_device = physical_device;
+    }
+
+    return suitable_device;
+}
+
+static void load_physical_device(Vulkan *vk, CTK_Stack *stack, VTK_PhysicalDeviceFeatures *requested_features) {
+    u32 fn_region = ctk_begin_region(stack);
+
+    // Load info about all physical devices.
+    auto vk_physical_devices = vtk_load_vk_objects<VkPhysicalDevice>(stack, vkEnumeratePhysicalDevices,
+                                                                     vk->instance.handle);
+    auto physical_devices = ctk_create_array<PhysicalDevice>(stack, vk_physical_devices.count);
+
+    for (u32 i = 0; i < vk_physical_devices.count; ++i) {
+        VkPhysicalDevice vk_physical_device = vk_physical_devices[i];
+        PhysicalDevice *physical_device = ctk_push(&physical_devices);
+        physical_device->handle = vk_physical_device;
+        physical_device->queue_fam_idxs = find_queue_family_idxs(vk_physical_device, vk, stack);
+        vkGetPhysicalDeviceFeatures(vk_physical_device, &physical_device->feats);
+        vkGetPhysicalDeviceProperties(vk_physical_device, &physical_device->props);
+        vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &physical_device->mem_props);
+        physical_device->depth_img_fmt = vtk_find_depth_image_format(physical_device->handle);
+    }
+
+    // Sort out discrete and integrated gpus.
+    auto discrete_devices = ctk_create_array<PhysicalDevice *>(stack, physical_devices.count);
+    auto integrated_devices = ctk_create_array<PhysicalDevice *>(stack, physical_devices.count);
+
+    for (u32 i = 0; i < physical_devices.count; ++i) {
+        PhysicalDevice *physical_device = physical_devices + i;
+        if (physical_device->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+            ctk_push(&discrete_devices, physical_device);
+        else if (physical_device->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+            ctk_push(&integrated_devices, physical_device);
+    }
+
+    // Find suitable discrete device, or fallback to an integrated device.
+    PhysicalDevice *suitable_device = find_suitable_physical_device(vk, &discrete_devices, requested_features);
+    if (suitable_device == NULL) {
+        suitable_device = find_suitable_physical_device(vk, &integrated_devices, requested_features);
+        if (suitable_device == NULL)
+            CTK_FATAL("failed to find any suitable device");
+    }
+
+    vk->physical_device = *suitable_device;
+    ctk_end_region(stack, fn_region);
+}
+
+static void create_device(Vulkan *vk, VTK_PhysicalDeviceFeatures *requested_features) {
     CTK_StaticArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
-    ctk_push(&queue_infos, default_queue_info(vk->device.queue_fam_idxs.graphics));
+    ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_fam_idxs.graphics));
 
     // Don't create separate queues if present and graphics belong to same queue family.
-    if (vk->device.queue_fam_idxs.present != vk->device.queue_fam_idxs.graphics)
-        ctk_push(&queue_infos, default_queue_info(vk->device.queue_fam_idxs.present));
+    if (vk->physical_device.queue_fam_idxs.present != vk->physical_device.queue_fam_idxs.graphics)
+        ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_fam_idxs.present));
 
-    VkPhysicalDeviceFeatures features = {};
     cstr extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+
+    VkBool32 enabled_features[VTK_PHYSICAL_DEVICE_FEATURE_COUNT] = {};
+    for (u32 i = 0; i < requested_features->count; ++i)
+        enabled_features[requested_features->data[i]] = VK_TRUE;
 
     VkDeviceCreateInfo logical_device_info = {};
     logical_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -207,15 +236,13 @@ static void load_device(Vulkan *vk, CTK_Stack *stack) {
     logical_device_info.ppEnabledLayerNames = NULL;
     logical_device_info.enabledExtensionCount = CTK_ARRAY_COUNT(extensions);
     logical_device_info.ppEnabledExtensionNames = extensions;
-    logical_device_info.pEnabledFeatures = &features;
-    vtk_validate_result(vkCreateDevice(vk->device.physical.handle, &logical_device_info, NULL, &vk->device.handle),
+    logical_device_info.pEnabledFeatures = (VkPhysicalDeviceFeatures *)enabled_features;
+    vtk_validate_result(vkCreateDevice(vk->physical_device.handle, &logical_device_info, NULL, &vk->device.handle),
                         "failed to create logical device");
 
     // Get logical vk->device queues.
-    vkGetDeviceQueue(vk->device.handle, vk->device.queue_fam_idxs.graphics, 0, &vk->device.queues.graphics);
-    vkGetDeviceQueue(vk->device.handle, vk->device.queue_fam_idxs.present, 0, &vk->device.queues.present);
-
-    ctk_end_region(stack, fn_region);
+    vkGetDeviceQueue(vk->device.handle, vk->physical_device.queue_fam_idxs.graphics, 0, &vk->device.queues.graphics);
+    vkGetDeviceQueue(vk->device.handle, vk->physical_device.queue_fam_idxs.present, 0, &vk->device.queues.present);
 }
 
 static void create_swapchain(Vulkan *vk, Memory *mem) {
@@ -227,10 +254,11 @@ static void create_swapchain(Vulkan *vk, Memory *mem) {
 
     // // Configure swapchain based on surface properties.
     // auto surface_fmts =
-    //     load_vk_objects<VkSurfaceFormatKHR>(&mem->temp, vkGetPhysicalDeviceSurfaceFormatsKHR, device->physical, surface);
+    //     vtk_load_vk_objects<VkSurfaceFormatKHR>(&mem->temp, vkGetPhysicalDeviceSurfaceFormatsKHR,
+    //                                             device->physical, surface);
     // auto surface_present_modes =
-    //     load_vk_objects<VkPresentModeKHR>(&mem->temp, vkGetPhysicalDeviceSurfacePresentModesKHR, device->physical,
-    //                                       surface);
+    //     vtk_load_vk_objects<VkPresentModeKHR>(&mem->temp, vkGetPhysicalDeviceSurfacePresentModesKHR,
+    //                                           device->physical, surface);
     // VkSurfaceCapabilitiesKHR surface_capabilities = {};
     // vtk_validate_result(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->physical, surface, &surface_capabilities),
     //                     "failed to get physical device surface capabilities");
@@ -272,8 +300,8 @@ static void create_swapchain(Vulkan *vk, Memory *mem) {
     // ////////////////////////////////////////////////////////////
     // /// Creation
     // ////////////////////////////////////////////////////////////
-    // u32 graphics_queue_fam_idx = vk->device.queue_fam_idxs.graphics;
-    // u32 present_queue_fam_idx = vk->device.queue_fam_idxs.present;
+    // u32 graphics_queue_fam_idx = vk->physical_device.queue_fam_idxs.graphics;
+    // u32 present_queue_fam_idx = vk->physical_device.queue_fam_idxs.present;
     // u32 queue_fam_idxs[] = { graphics_queue_fam_idx, present_queue_fam_idx };
 
     // VkSwapchainCreateInfoKHR info = {};
@@ -311,11 +339,9 @@ static void create_swapchain(Vulkan *vk, Memory *mem) {
     // ////////////////////////////////////////////////////////////
     // /// Image View Creation
     // ////////////////////////////////////////////////////////////
-    // auto swapchain_images = load_vk_objects<VkImage>(&mem->temp, vkGetSwapchainImagesKHR, vk->device.handle,
-    //                                                  swapchain.handle);
+    // auto swapchain_images = vtk_load_vk_objects<VkImage>(&mem->temp, vkGetSwapchainImagesKHR, vk->device.handle,
+    //                                                      swapchain.handle);
     // swapchain.image_views = ctk_create_array_full<VkImageView>(&mem->free_list, swapchain_images.count);
-
-    // swapchain.image_views = ctk_create_array_full(ctk_alloc<VkImageView>(&mem->free_list, swapchain_images.count));
     // for (u32 i = 0; i < swapchain_images.count; ++i) {
     //     VkImageViewCreateInfo view_info = {};
     //     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -341,8 +367,15 @@ static void create_swapchain(Vulkan *vk, Memory *mem) {
 
 static Vulkan *create_vulkan(Core *core, Platform *platform) {
     auto vk = ctk_alloc<Vulkan>(&core->mem.perma, 1);
-    init_instance(&vk->instance, &core->mem.temp);
+    create_instance(&vk->instance, &core->mem.temp);
     vk->surface = get_surface(&vk->instance, platform);
-    load_device(vk, &core->mem.temp);
+
+    // Physical/Logical Devices
+    VTK_PhysicalDeviceFeatures requested_features = {};
+    ctk_push(&requested_features, (s32)VTK_PHYSICAL_DEVICE_FEATURE_geometryShader);
+    load_physical_device(vk, &core->mem.temp, &requested_features);
+    create_device(vk, &requested_features);
+
+    create_swapchain(vk, &core->mem);
     return vk;
 }
