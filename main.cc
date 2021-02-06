@@ -1,4 +1,3 @@
-#include "ctk/ctk.h"
 #include "renderer/core.h"
 #include "renderer/vulkan.h"
 #include "renderer/platform.h"

@@ -4,6 +4,8 @@
 #include <winuser.h>
 #include <vulkan/vulkan.h>
 #include "ctk/ctk.h"
+#include "ctk/memory.h"
+#include "ctk/containers.h"
 
 // Defined because WinUser.h doesn't define these.
 #define VK_0 0x30

@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan.h>
 #include "ctk/ctk.h"
+#include "ctk/memory.h"
+#include "ctk/containers.h"
 #include "vtk/vtk.h"
 #include "vtk/device_features.h"
 #include "renderer/core.h"
@@ -338,7 +340,7 @@ static void create_swapchain(Vulkan *vk, Memory *mem) {
 
     // ////////////////////////////////////////////////////////////
     // /// Image View Creation
-    // ////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////// //////////////////
     // auto swapchain_images = vtk_load_vk_objects<VkImage>(&mem->temp, vkGetSwapchainImagesKHR, vk->device.handle,
     //                                                      swapchain.handle);
     // swapchain.image_views = ctk_create_array_full<VkImageView>(&mem->free_list, swapchain_images.count);
