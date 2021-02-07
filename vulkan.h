@@ -91,9 +91,9 @@ static void create_instance(Instance *instance, CTK_Stack *stack) {
     info.flags = 0;
     info.pApplicationInfo = &app_info;
     info.enabledLayerCount = layers.count;
-    info.ppEnabledLayerNames = layers.data;
+    info.ppEnabledLayerNames = layers.data.mem;
     info.enabledExtensionCount = extensions.count;
-    info.ppEnabledExtensionNames = extensions.data;
+    info.ppEnabledExtensionNames = extensions.data.mem;
     vtk_validate_result(vkCreateInstance(&info, NULL, &instance->handle), "failed to create Vulkan instance");
 
     VTK_LOAD_INSTANCE_EXTENSION_FUNCTION(instance->handle, vkCreateDebugUtilsMessengerEXT)

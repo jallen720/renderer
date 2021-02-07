@@ -23,10 +23,10 @@ struct Core {
 ////////////////////////////////////////////////////////////
 static Core *create_core() {
     // Memory
-    CTK_Stack perma_stack = ctk_create_stack(4 * CTK_KILOBYTE);
+    CTK_Stack perma_stack = ctk_create_stack(4 * CTK_MEGABYTE);
     auto core = ctk_alloc<Core>(&perma_stack, 1);
     core->mem.perma = perma_stack;
-    core->mem.temp = ctk_create_stack(&core->mem.perma, CTK_KILOBYTE);
+    core->mem.temp = ctk_create_stack(&core->mem.perma, CTK_MEGABYTE);
     core->mem.free_list = ctk_create_free_list(4 * CTK_MEGABYTE);
     return core;
 }
