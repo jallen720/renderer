@@ -86,7 +86,7 @@ static constexpr u32 PLATFORM_VULKAN_EXTENSION_COUNT = CTK_ARRAY_COUNT(PLATFORM_
 /// Interface
 ////////////////////////////////////////////////////////////
 static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPARAM w_param, _In_ LPARAM l_param) {
-    Window *window = ctk_find_value(hwnd, active_windows.data, active_windows.count);
+    Window *window = ctk_find_value(active_windows.data, active_windows.count, hwnd);
     if (window != NULL) {
         switch (msg) {
             case WM_DESTROY: {
