@@ -107,16 +107,17 @@ static void create_instance(Instance *instance, CTK_Stack *stack) {
 }
 
 static VkSurfaceKHR get_surface(Instance *instance, Platform *platform) {
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+
+#if defined(WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
     VkWin32SurfaceCreateInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     info.hwnd = platform->window->handle;
     info.hinstance = platform->instance;
-
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
     vtk_validate_result(vkCreateWin32SurfaceKHR(instance->handle, &info, nullptr, &surface),
                         "failed to get win32 surface");
 #else
+    CTK_FATAL("non-windows platforms currently unsupported");
 #endif
 
     return surface;
@@ -147,7 +148,6 @@ static QueueFamilyIndexes find_queue_family_idxs(VkPhysicalDevice physical_devic
 static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<PhysicalDevice *> *physical_devices,
                                                      VTK_PhysicalDeviceFeatures *requested_features) {
     PhysicalDevice *suitable_device = NULL;
-
     for (u32 i = 0; suitable_device == NULL && i < physical_devices->count; ++i) {
         PhysicalDevice *physical_device = physical_devices->data[i];
 
@@ -157,20 +157,17 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<Physi
 
         // Check that all requested features are supported.
         VTK_PhysicalDeviceFeatures unsupported_features = {};
-
         for (u32 feat_idx = 0; feat_idx < requested_features->count; ++feat_idx) {
             s32 requested_feature = requested_features->data[feat_idx];
             if (!vtk_physical_device_feature_supported(requested_feature, &physical_device->feats))
                 ctk_push(&unsupported_features, requested_feature);
         }
-
         bool requested_features_supported = unsupported_features.count == 0;
 
         // Check if device passes all tests and load more physical_device about device if so.
         if (has_required_queue_families && requested_features_supported)
             suitable_device = physical_device;
     }
-
     return suitable_device;
 }
 
