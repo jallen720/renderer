@@ -51,6 +51,11 @@ struct Vulkan {
     Device device;
     Swapchain swapchain;
     VkCommandPool graphics_cmd_pool;
+
+    struct {
+        VTK_Buffer host;
+        VTK_Buffer device;
+    } buffers;
 };
 
 static void create_instance(Instance *instance, CTK_Stack *stack) {
@@ -375,6 +380,27 @@ static void create_graphics_cmd_pool(Vulkan *vk) {
                         "failed to create command pool");
 }
 
+static void create_buffers(Vulkan *vk) {
+    VTK_BufferInfo host_buf_info = {};
+    host_buf_info.size = 256 * CTK_MEGABYTE;
+    host_buf_info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    host_buf_info.memory_property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    host_buf_info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+    vk->buffers.host = vtk_create_buffer(&vk->device.handle, &host_buf_info);
+
+    VTK_BufferInfo device_buf_info = {};
+    device_buf_info.size = 256 * CTK_MEGABYTE;
+    device_buf_info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    device_buf_info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    device_buf_info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+    vk->buffers.device = vtk_create_buffer(&vk->device.handle, &vk->physical_device.mem_props, &device_buf_info);
+}
+
 static Vulkan *create_vulkan(Core *core, Platform *platform) {
     auto vk = ctk_alloc<Vulkan>(&core->mem.perma, 1);
     create_instance(&vk->instance, &core->mem.temp);
@@ -388,5 +414,7 @@ static Vulkan *create_vulkan(Core *core, Platform *platform) {
 
     create_swapchain(vk, &core->mem);
     create_graphics_cmd_pool(vk);
+    create_buffers(vk);
+
     return vk;
 }
