@@ -1,0 +1,3 @@
+render in ndc
+test perspective stuff
+learn about vk buffers

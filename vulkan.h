@@ -146,7 +146,7 @@ static QueueFamilyIndexes find_queue_family_idxs(VkPhysicalDevice physical_devic
 }
 
 static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<PhysicalDevice *> *physical_devices,
-                                                     VTK_PhysicalDeviceFeatures *requested_features) {
+                                                     VTK_PhysicalDeviceFeatureArray *requested_features) {
     PhysicalDevice *suitable_device = NULL;
     for (u32 i = 0; suitable_device == NULL && i < physical_devices->count; ++i) {
         PhysicalDevice *physical_device = physical_devices->data[i];
@@ -156,7 +156,7 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<Physi
                                            physical_device->queue_fam_idxs.present  != CTK_U32_MAX;
 
         // Check that all requested features are supported.
-        VTK_PhysicalDeviceFeatures unsupported_features = {};
+        VTK_PhysicalDeviceFeatureArray unsupported_features = {};
         for (u32 feat_idx = 0; feat_idx < requested_features->count; ++feat_idx) {
             s32 requested_feature = requested_features->data[feat_idx];
             if (!vtk_physical_device_feature_supported(requested_feature, &physical_device->feats))
@@ -171,7 +171,7 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<Physi
     return suitable_device;
 }
 
-static void load_physical_device(Vulkan *vk, CTK_Stack *stack, VTK_PhysicalDeviceFeatures *requested_features) {
+static void load_physical_device(Vulkan *vk, CTK_Stack *stack, VTK_PhysicalDeviceFeatureArray *requested_features) {
     u32 fn_region = ctk_begin_region(stack);
 
     // Load info about all physical devices.
@@ -214,7 +214,7 @@ static void load_physical_device(Vulkan *vk, CTK_Stack *stack, VTK_PhysicalDevic
     ctk_end_region(stack, fn_region);
 }
 
-static void create_device(Vulkan *vk, VTK_PhysicalDeviceFeatures *requested_features) {
+static void create_device(Vulkan *vk, VTK_PhysicalDeviceFeatureArray *requested_features) {
     CTK_StaticArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
     ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_fam_idxs.graphics));
 
@@ -254,12 +254,11 @@ static void create_swapchain(Vulkan *vk, Memory *mem) {
     ////////////////////////////////////////////////////////////
 
     // Configure swapchain based on surface properties.
-    auto surface_fmts =
-        vtk_load_vk_objects<VkSurfaceFormatKHR>(&mem->temp, vkGetPhysicalDeviceSurfaceFormatsKHR,
-                                                vk->physical_device.handle, vk->surface);
-    auto surface_present_modes =
-        vtk_load_vk_objects<VkPresentModeKHR>(&mem->temp, vkGetPhysicalDeviceSurfacePresentModesKHR,
-                                              vk->physical_device.handle, vk->surface);
+    auto surface_fmts = vtk_load_vk_objects<VkSurfaceFormatKHR>(&mem->temp, vkGetPhysicalDeviceSurfaceFormatsKHR,
+                                                                vk->physical_device.handle, vk->surface);
+    auto surface_present_modes = vtk_load_vk_objects<VkPresentModeKHR>(&mem->temp,
+                                                                       vkGetPhysicalDeviceSurfacePresentModesKHR,
+                                                                       vk->physical_device.handle, vk->surface);
     VkSurfaceCapabilitiesKHR surface_capabilities = {};
     vtk_validate_result(
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk->physical_device.handle, vk->surface, &surface_capabilities),
@@ -382,7 +381,7 @@ static Vulkan *create_vulkan(Core *core, Platform *platform) {
     vk->surface = get_surface(&vk->instance, platform);
 
     // Physical/Logical Devices
-    VTK_PhysicalDeviceFeatures requested_features = {};
+    VTK_PhysicalDeviceFeatureArray requested_features = {};
     ctk_push(&requested_features, (s32)VTK_PHYSICAL_DEVICE_FEATURE_geometryShader);
     load_physical_device(vk, &core->mem.temp, &requested_features);
     create_device(vk, &requested_features);
