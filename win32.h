@@ -125,7 +125,7 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
     return DefWindowProc(hwnd, msg, w_param, l_param);
 }
 
-static Window *create_window(CTK_Stack *stack, Platform *platform, WindowInfo info) {
+static Window *create_window(CTK_Allocator *allocator, Platform *platform, WindowInfo info) {
     static wchar_t const *CLASS_NAME = L"win32_window";
 
     WNDCLASS win_class = {};
@@ -134,13 +134,13 @@ static Window *create_window(CTK_Stack *stack, Platform *platform, WindowInfo in
     win_class.lpszClassName = CLASS_NAME;
     RegisterClass(&win_class);
 
-    auto window = ctk_alloc<Window>(stack, 1);
+    auto window = ctk_alloc<Window>(allocator, 1);
     window->open = true;
     window->handle = CreateWindowEx(0,                       // Optional window styles.
                                     CLASS_NAME,              // Window class
                                     info.title,              // Window text
                                     WS_OVERLAPPEDWINDOW,     // Window style
-                                    info.x, info.y,          // Position
+                                    info.x,     info.y,      // Position
                                     info.width, info.height, // Size
                                     NULL,                    // Parent window
                                     NULL,                    // Menu
@@ -154,14 +154,14 @@ static Window *create_window(CTK_Stack *stack, Platform *platform, WindowInfo in
     return window;
 }
 
-static Platform *create_platform(CTK_Stack *stack) {
-    auto platform = ctk_alloc<Platform>(stack, 1);
+static Platform *create_platform(CTK_Allocator *allocator) {
+    auto platform = ctk_alloc<Platform>(allocator, 1);
     platform->instance = GetModuleHandle(NULL);
 
     // Window
     WindowInfo window_info = PLATFORM_DEFAULT_WINDOW_INFO;
     window_info.title = L"Renderer";
-    platform->window = create_window(stack, platform, window_info);
+    platform->window = create_window(allocator, platform, window_info);
 
     // Map Keys
     #include "renderer/win32_keymap.h"
