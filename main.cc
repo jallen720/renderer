@@ -1,6 +1,5 @@
-#include "renderer/core.h"
-#include "renderer/vulkan.h"
 #include "renderer/platform.h"
+#include "renderer/graphics.h"
 
 // struct Mesh {
 //     CTK_Array<CTK_Vector3<f32>> vertexes;
@@ -23,9 +22,8 @@
 // }
 
 s32 main() {
-    Core *core = create_core();
-    Platform *platform = create_platform(&core->mem.perma->allocator);
-    Vulkan* vulkan = create_vulkan(core, platform);
+    Platform *platform = create_platform();
+    Graphics *graphics = create_graphics(platform);
 
     // Main Loop
     while (platform->window->open) {

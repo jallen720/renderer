@@ -1,3 +1,5 @@
+#pragma once
+
 enum {
     INPUT_KEY_0,
     INPUT_KEY_1,
