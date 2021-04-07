@@ -22,8 +22,14 @@
 // }
 
 s32 main() {
+    // Init
     Platform *platform = create_platform();
     Graphics *graphics = create_graphics(platform);
+
+    // Load Data
+    Shader *vert = load_shader(graphics, "data/shaders/triangle.vert");
+    Shader *frag = load_shader(graphics, "data/shaders/triangle.frag");
+    Pipeline *default_pipeline = create_pipeline(graphics, { vert, frag });
 
     // Main Loop
     while (platform->window->open) {

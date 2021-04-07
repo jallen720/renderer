@@ -23,12 +23,13 @@ struct PhysicalDevice {
     QueueFamilyIndexes queue_family_indexes;
     VkPhysicalDeviceFeatures features;
     VkPhysicalDeviceProperties properties;
-    VkPhysicalDeviceMemoryProperties memory_properties;
+    VkPhysicalDeviceMemoryProperties mem_properties;
     VkFormat depth_image_format;
 };
 
 struct LogicalDevice {
     VkDevice handle;
+
     struct {
         VkQueue graphics;
         VkQueue present;
@@ -43,21 +44,52 @@ struct Swapchain {
     VkExtent2D extent;
 };
 
+struct BufferInfo {
+    VkDeviceSize size;
+    VkBufferUsageFlags usage_flags;
+    VkMemoryPropertyFlags mem_property_flags;
+    VkSharingMode sharing_mode;
+};
+
+struct Buffer {
+    VkBuffer handle;
+    VkDeviceMemory mem;
+    VkDeviceSize size;
+    VkDeviceSize end;
+};
+
+struct Region {
+    Buffer *buffer;
+    VkDeviceSize size;
+    VkDeviceSize offset;
+};
+
 struct Vulkan {
     Instance instance;
     VkSurfaceKHR surface;
-    PhysicalDevice physical_device;
-    LogicalDevice logical_device;
+
+    struct {
+        PhysicalDevice physical;
+        LogicalDevice logical;
+    } device;
+
     Swapchain swapchain;
-    VkCommandPool graphics_command_pool;
+    VkCommandPool graphics_cmd_pool;
+
     struct {
 
-    } command_buffers;
+    } cmd_buffers;
+
     struct {
-        VTK_Buffer host;
-        VTK_Buffer device;
+        Buffer host;
+        Buffer device;
     } buffers;
-    VTK_Region staging_region;
+
+    Region staging_region;
+
+    struct {
+        VkDescriptorPool pool;
+    } descriptor;
 };
 
 struct Graphics {
@@ -65,7 +97,8 @@ struct Graphics {
         CTK_Stack *base;
         CTK_Stack *temp;
     } mem;
-    Vulkan *vulkan;
+
+    Vulkan vulkan;
 };
 
 static void init_instance(Instance *instance, CTK_Stack *temp_mem) {
@@ -197,7 +230,7 @@ static void load_physical_device(Vulkan *vulkan, CTK_Stack *temp_mem, VTK_Physic
         physical_device->queue_family_indexes = find_queue_family_indexes(vk_physical_device, vulkan, temp_mem);
         vkGetPhysicalDeviceFeatures(vk_physical_device, &physical_device->features);
         vkGetPhysicalDeviceProperties(vk_physical_device, &physical_device->properties);
-        vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &physical_device->memory_properties);
+        vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &physical_device->mem_properties);
         physical_device->depth_image_format = vtk_find_depth_image_format(physical_device->handle);
     }
 
@@ -207,6 +240,7 @@ static void load_physical_device(Vulkan *vulkan, CTK_Stack *temp_mem, VTK_Physic
 
     for (u32 i = 0; i < physical_devices->count; ++i) {
         PhysicalDevice *physical_device = physical_devices->data + i;
+
         if (physical_device->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             ctk_push(discrete_devices, physical_device);
         else if (physical_device->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
@@ -215,27 +249,29 @@ static void load_physical_device(Vulkan *vulkan, CTK_Stack *temp_mem, VTK_Physic
 
     // Find suitable discrete device, or fallback to an integrated device.
     PhysicalDevice *suitable_device = find_suitable_physical_device(vulkan, discrete_devices, requested_features);
+
     if (suitable_device == NULL) {
         suitable_device = find_suitable_physical_device(vulkan, integrated_devices, requested_features);
+
         if (suitable_device == NULL)
             CTK_FATAL("failed to find any suitable device");
     }
 
-    vulkan->physical_device = *suitable_device;
+    vulkan->device.physical = *suitable_device;
     ctk_end_region(temp_mem, fn_region);
 }
 
 static void init_logical_device(Vulkan *vulkan, VTK_PhysicalDeviceFeatureArray *requested_features) {
     CTK_StaticArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
-    ctk_push(&queue_infos, vtk_default_queue_info(vulkan->physical_device.queue_family_indexes.graphics));
+    ctk_push(&queue_infos, vtk_default_queue_info(vulkan->device.physical.queue_family_indexes.graphics));
 
     // Don't create separate queues if present and graphics belong to same queue family.
-    if (vulkan->physical_device.queue_family_indexes.present != vulkan->physical_device.queue_family_indexes.graphics)
-        ctk_push(&queue_infos, vtk_default_queue_info(vulkan->physical_device.queue_family_indexes.present));
+    if (vulkan->device.physical.queue_family_indexes.present != vulkan->device.physical.queue_family_indexes.graphics)
+        ctk_push(&queue_infos, vtk_default_queue_info(vulkan->device.physical.queue_family_indexes.present));
 
     cstr extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-
     VkBool32 enabled_features[VTK_PHYSICAL_DEVICE_FEATURE_COUNT] = {};
+
     for (u32 i = 0; i < requested_features->count; ++i)
         enabled_features[requested_features->data[i]] = VK_TRUE;
 
@@ -250,14 +286,14 @@ static void init_logical_device(Vulkan *vulkan, VTK_PhysicalDeviceFeatureArray *
     logical_device_info.ppEnabledExtensionNames = extensions;
     logical_device_info.pEnabledFeatures = (VkPhysicalDeviceFeatures *)enabled_features;
     vtk_validate_result(
-        vkCreateDevice(vulkan->physical_device.handle, &logical_device_info, NULL, &vulkan->logical_device.handle),
+        vkCreateDevice(vulkan->device.physical.handle, &logical_device_info, NULL, &vulkan->device.logical.handle),
         "failed to create logical device");
 
-    // Get logical vulkan->logical_device queues.
-    vkGetDeviceQueue(vulkan->logical_device.handle, vulkan->physical_device.queue_family_indexes.graphics, 0,
-                     &vulkan->logical_device.queues.graphics);
-    vkGetDeviceQueue(vulkan->logical_device.handle, vulkan->physical_device.queue_family_indexes.present, 0,
-                     &vulkan->logical_device.queues.present);
+    // Get logical vulkan->device.logical queues.
+    vkGetDeviceQueue(vulkan->device.logical.handle, vulkan->device.physical.queue_family_indexes.graphics, 0,
+                     &vulkan->device.logical.queues.graphics);
+    vkGetDeviceQueue(vulkan->device.logical.handle, vulkan->device.physical.queue_family_indexes.present, 0,
+                     &vulkan->device.logical.queues.present);
 }
 
 static void init_swapchain(Vulkan *vulkan, CTK_Stack *temp_mem) {
@@ -270,13 +306,13 @@ static void init_swapchain(Vulkan *vulkan, CTK_Stack *temp_mem) {
     // Configure swapchain based on surface properties.
     auto surface_formats = vtk_load_vk_objects<VkSurfaceFormatKHR>(&temp_mem->allocator,
                                                                    vkGetPhysicalDeviceSurfaceFormatsKHR,
-                                                                   vulkan->physical_device.handle, vulkan->surface);
+                                                                   vulkan->device.physical.handle, vulkan->surface);
     auto surface_present_modes = vtk_load_vk_objects<VkPresentModeKHR>(&temp_mem->allocator,
                                                                        vkGetPhysicalDeviceSurfacePresentModesKHR,
-                                                                       vulkan->physical_device.handle, vulkan->surface);
+                                                                       vulkan->device.physical.handle, vulkan->surface);
     VkSurfaceCapabilitiesKHR surface_capabilities = {};
     vtk_validate_result(
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vulkan->physical_device.handle, vulkan->surface, &surface_capabilities),
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vulkan->device.physical.handle, vulkan->surface, &surface_capabilities),
         "failed to get physical device surface capabilities");
 
     // Default to first surface format.
@@ -316,8 +352,8 @@ static void init_swapchain(Vulkan *vulkan, CTK_Stack *temp_mem) {
     ////////////////////////////////////////////////////////////
     /// Creation
     ////////////////////////////////////////////////////////////
-    u32 graphics_queue_family_index = vulkan->physical_device.queue_family_indexes.graphics;
-    u32 present_queue_family_index = vulkan->physical_device.queue_family_indexes.present;
+    u32 graphics_queue_family_index = vulkan->device.physical.queue_family_indexes.graphics;
+    u32 present_queue_family_index = vulkan->device.physical.queue_family_indexes.present;
     u32 queue_family_indexes[] = { graphics_queue_family_index, present_queue_family_index };
 
     VkSwapchainCreateInfoKHR info = {};
@@ -345,7 +381,7 @@ static void init_swapchain(Vulkan *vulkan, CTK_Stack *temp_mem) {
         info.queueFamilyIndexCount = 0;
         info.pQueueFamilyIndices = NULL;
     }
-    vtk_validate_result(vkCreateSwapchainKHR(vulkan->logical_device.handle, &info, NULL, &vulkan->swapchain.handle),
+    vtk_validate_result(vkCreateSwapchainKHR(vulkan->device.logical.handle, &info, NULL, &vulkan->swapchain.handle),
                         "failed to create swapchain");
 
     // Store surface state used to create swapchain for future reference.
@@ -356,9 +392,10 @@ static void init_swapchain(Vulkan *vulkan, CTK_Stack *temp_mem) {
     /// Image View Creation
     ////////////////////////////////////////// //////////////////
     auto swapchain_images = vtk_load_vk_objects<VkImage>(&temp_mem->allocator, vkGetSwapchainImagesKHR,
-                                                         vulkan->logical_device.handle, vulkan->swapchain.handle);
+                                                         vulkan->device.logical.handle, vulkan->swapchain.handle);
     CTK_ASSERT(swapchain_images->count <= ctk_size(&vulkan->swapchain.image_views));
     vulkan->swapchain.image_views.count = swapchain_images->count;
+
     for (u32 i = 0; i < swapchain_images->count; ++i) {
         VkImageViewCreateInfo view_info = {};
         view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -376,48 +413,120 @@ static void init_swapchain(Vulkan *vulkan, CTK_Stack *temp_mem) {
         view_info.subresourceRange.baseArrayLayer = 0;
         view_info.subresourceRange.layerCount = 1;
         vtk_validate_result(
-            vkCreateImageView(vulkan->logical_device.handle, &view_info, NULL, vulkan->swapchain.image_views.data + i),
+            vkCreateImageView(vulkan->device.logical.handle, &view_info, NULL, vulkan->swapchain.image_views.data + i),
             "failed to create image view");
     }
 
     ctk_end_region(temp_mem, fn_region);
 }
 
-static void init_graphics_command_pool(Vulkan *vulkan) {
+static void init_graphics_cmd_pool(Vulkan *vulkan) {
     VkCommandPoolCreateInfo cmd_pool_info = {};
     cmd_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    cmd_pool_info.queueFamilyIndex = vulkan->physical_device.queue_family_indexes.graphics;
+    cmd_pool_info.queueFamilyIndex = vulkan->device.physical.queue_family_indexes.graphics;
     vtk_validate_result(
-        vkCreateCommandPool(vulkan->logical_device.handle, &cmd_pool_info, NULL, &vulkan->graphics_command_pool),
+        vkCreateCommandPool(vulkan->device.logical.handle, &cmd_pool_info, NULL, &vulkan->graphics_cmd_pool),
         "failed to create command pool");
 }
 
-static void init_buffers(Vulkan *vulkan) {
-    VTK_BufferInfo host_buf_info = {};
-    host_buf_info.size = 256 * CTK_MEGABYTE;
-    host_buf_info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    host_buf_info.memory_property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    host_buf_info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
-    vulkan->buffers.host = vtk_create_buffer(vulkan->logical_device.handle, vulkan->physical_device.memory_properties,
-                                             &host_buf_info);
+static VkDeviceMemory allocate_device_memory(VkDevice device, VkPhysicalDeviceMemoryProperties mem_properties,
+                                             VkMemoryRequirements mem_reqs,
+                                             VkMemoryPropertyFlags mem_property_flags) {
+    // Allocate memory
+    VkMemoryAllocateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    info.allocationSize = mem_reqs.size;
+    info.memoryTypeIndex = vtk_find_memory_type_index(mem_properties, mem_reqs, mem_property_flags);
+    VkDeviceMemory mem = VK_NULL_HANDLE;
+    vtk_validate_result(vkAllocateMemory(device, &info, NULL, &mem), "failed to allocate memory");
+    return mem;
+}
 
-    VTK_BufferInfo device_buf_info = {};
-    device_buf_info.size = 256 * CTK_MEGABYTE;
-    device_buf_info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    device_buf_info.memory_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    device_buf_info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
-    vulkan->buffers.device = vtk_create_buffer(vulkan->logical_device.handle, vulkan->physical_device.memory_properties,
-                                               &device_buf_info);
+static Buffer create_buffer(VkDevice device, VkPhysicalDeviceMemoryProperties mem_properties, BufferInfo *buffer_info) {
+    Buffer buffer = {};
+    buffer.size = buffer_info->size;
+
+    VkBufferCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    info.size = buffer_info->size;
+    info.usage = buffer_info->usage_flags;
+    info.sharingMode = buffer_info->sharing_mode;
+    info.queueFamilyIndexCount = 0;
+    info.pQueueFamilyIndices = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+    vtk_validate_result(vkCreateBuffer(device, &info, NULL, &buffer.handle), "failed to create buffer");
+
+    // Allocate / Bind Memory
+    VkMemoryRequirements mem_reqs = {};
+    vkGetBufferMemoryRequirements(device, buffer.handle, &mem_reqs);
+    buffer.mem = allocate_device_memory(device, mem_properties, mem_reqs, buffer_info->mem_property_flags);
+    vtk_validate_result(vkBindBufferMemory(device, buffer.handle, buffer.mem, 0), "failed to bind buffer memory");
+
+    return buffer;
+}
+
+static Region allocate_region(Buffer *buffer, u32 size, VkDeviceSize align = 1) {
+    VkDeviceSize align_offset = buffer->end % align;
+
+    Region region = {};
+    region.buffer = buffer;
+    region.offset = align_offset ? buffer->end - align_offset + align : buffer->end;
+
+    if (region.offset + size > buffer->size) {
+        CTK_FATAL("buffer (size=%u end=%u) cannot allocate region of size %u and alignment %u (only %u bytes left)",
+                  buffer->size, buffer->end, size, align, buffer->size - buffer->end);
+    }
+
+    region.size = size;
+    buffer->end = region.offset + region.size;
+
+    return region;
+}
+
+static void init_buffers(Vulkan *vulkan) {
+    BufferInfo host_buffer_info = {};
+    host_buffer_info.size = 256 * CTK_MEGABYTE;
+    host_buffer_info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    host_buffer_info.mem_property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    host_buffer_info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+    vulkan->buffers.host = create_buffer(vulkan->device.logical.handle, vulkan->device.physical.mem_properties,
+                                         &host_buffer_info);
+
+    BufferInfo device_buffer_info = {};
+    device_buffer_info.size = 256 * CTK_MEGABYTE;
+    device_buffer_info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    device_buffer_info.mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    device_buffer_info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
+    vulkan->buffers.device = create_buffer(vulkan->device.logical.handle, vulkan->device.physical.mem_properties,
+                                           &device_buffer_info);
+}
+
+static void init_descriptor_pool(Vulkan *vulkan) {
+    // Pool
+    VkDescriptorPoolSize pool_sizes[] = {
+        // { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 16 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
+        // { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 16 },
+        // { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 },
+    };
+
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = 0;
+    pool_info.maxSets = 64;
+    pool_info.poolSizeCount = CTK_ARRAY_COUNT(pool_sizes);
+    pool_info.pPoolSizes = pool_sizes;
+    vtk_validate_result(vkCreateDescriptorPool(vulkan->device.logical.handle, &pool_info, NULL, &vulkan->descriptor.pool),
+                        "failed to create descriptor pool");
 }
 
 static void init_vulkan(Graphics *graphics, Platform *platform) {
-    Vulkan *vulkan = ctk_alloc<Vulkan>(graphics->mem.base, 1);
+    Vulkan *vulkan = &graphics->vulkan;
     init_instance(&vulkan->instance, graphics->mem.temp);
     init_surface(vulkan, platform);
 
@@ -428,11 +537,16 @@ static void init_vulkan(Graphics *graphics, Platform *platform) {
     init_logical_device(vulkan, &requested_features);
 
     init_swapchain(vulkan, graphics->mem.temp);
-    init_graphics_command_pool(vulkan);
+    init_graphics_cmd_pool(vulkan);
     init_buffers(vulkan);
-    vulkan->staging_region = vtk_allocate_region(&vulkan->buffers.host, 64 * CTK_MEGABYTE);
+    vulkan->staging_region = allocate_region(&vulkan->buffers.host, 64 * CTK_MEGABYTE);
 
-    graphics->vulkan = vulkan;
+    // Descriptor Sets
+    init_descriptor_pool(vulkan);
+}
+
+static void create_something() {
+
 }
 
 static Graphics *create_graphics(Platform *platform) {
@@ -444,6 +558,7 @@ static Graphics *create_graphics(Platform *platform) {
 
     // Initialization
     init_vulkan(graphics, platform);
+    create_something();
 
     return graphics;
 }
