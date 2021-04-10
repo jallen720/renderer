@@ -1,32 +1,24 @@
 #include "renderer/platform.h"
 #include "renderer/vulkan.h"
 
-struct App
-{
-    struct
-    {
+struct App {
+    struct {
         CTK_Stack *base;
         CTK_Stack *temp;
-    }
-    mem;
+    } mem;
 
-    struct
-    {
+    struct {
         Buffer *host;
         Buffer *device;
-    }
-    buffers;
+    } buffers;
 
-    struct
-    {
+    struct {
         Region *staging;
         Region *mesh;
-    }
-    regions;
+    } regions;
 };
 
-static void create_buffers(App *app, Vulkan *vulkan)
-{
+static void create_buffers(App *app, Vulkan *vulkan) {
     {
         BufferInfo info = {};
         info.size = 256 * CTK_MEGABYTE;
@@ -51,38 +43,31 @@ static void create_buffers(App *app, Vulkan *vulkan)
     }
 }
 
-static void allocate_regions(App *app, Vulkan *vulkan)
-{
-    app->regions.staging = allocate_region(app->buffers.host, 64 * CTK_MEGABYTE);
-    app->regions.mesh = allocate_region(app->buffers.device, 64, 64);
+static void allocate_regions(App *app, Vulkan *vulkan) {
+    app->regions.staging = allocate_region(vulkan, app->buffers.host, 64 * CTK_MEGABYTE);
+    app->regions.mesh = allocate_region(vulkan, app->buffers.device, 64, 64);
 }
 
-static App *create_app(Vulkan *vulkan)
-{
+static App *create_app(Vulkan *vulkan) {
     CTK_Stack *base = ctk_create_stack(CTK_GIGABYTE);
-    auto app = ctk_alloc<App>(1, base);
+    auto app = ctk_alloc<App>(base, 1);
     app->mem.base = base;
-    app->mem.temp = ctk_create_stack(CTK_GIGABYTE, &base->allocator);
+    app->mem.temp = ctk_create_stack(CTK_MEGABYTE, &base->allocator);
 
     create_buffers(app, vulkan);
     allocate_regions(app, vulkan);
+
+    return app;
 }
 
-s32 main()
-{
+s32 main() {
     // Init
     Platform *platform = create_platform();
-    Vulkan *vulkan = create_graphics(platform);
+    Vulkan *vulkan = create_vulkan(platform);
     App *app = create_app(vulkan);
 
-    //// Load Data
-    //Shader *vert = load_shader(vulkan, "data/shaders/triangle.vert");
-    //Shader *frag = load_shader(vulkan, "data/shaders/triangle.frag");
-    //Pipeline *default_pipeline = create_pipeline(vulkan, { vert, frag });
-
     // Main Loop
-    while (platform->window->open)
-    {
+    while (platform->window->open) {
         // Handle Input
         process_events(platform->window);
         if (key_down(platform, INPUT_KEY_ESCAPE))
