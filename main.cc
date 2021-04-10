@@ -1,13 +1,6 @@
 #include "renderer/platform.h"
 #include "renderer/graphics.h"
 
-// struct Mesh {
-//     CTK_Array<CTK_Vector3<f32>> vertexes;
-//     CTK_Array<u32> indexes;
-//     VTK_Region vertex_region;
-//     VTK_Region index_region;
-// };
-
 // static void load_mesh(Mesh *mesh) {
 //     u32 verts_byte_size = ctk_byte_size(&mesh->vertexes);
 //     u32 idxs_byte_size = ctk_byte_size(&mesh->indexes);
@@ -25,6 +18,8 @@ s32 main() {
     // Init
     Platform *platform = create_platform();
     Graphics *graphics = create_graphics(platform);
+    create_buffer(graphics, 256 * CTK_MEGABYTE, BUFFER_TYPE_HOST);
+
 
     //// Load Data
     //Shader *vert = load_shader(graphics, "data/shaders/triangle.vert");
