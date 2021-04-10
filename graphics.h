@@ -108,9 +108,9 @@ struct Graphics
 
     struct
     {
-
+        VkCommandBuffer temp;
     }
-    cmd_buffers;
+    command_buffers;
 
     struct
     {
@@ -222,10 +222,13 @@ static QueueFamilyIndexes find_queue_family_indexes(VkPhysicalDevice physical_de
 static PhysicalDevice *find_suitable_physical_device(Graphics *graphics, CTK_Array<PhysicalDevice *> *physical_devices,
                                                      CTK_Array<s32> *requested_features)
 {
+    u32 fn_region = ctk_begin_region(graphics->mem.temp);
+    auto unsupported_features = ctk_create_array<s32>(requested_features->size, &graphics->mem.temp->allocator);
     PhysicalDevice *suitable_device = NULL;
 
     for (u32 i = 0; suitable_device == NULL && i < physical_devices->count; ++i)
     {
+        ctk_clear(unsupported_features);
         PhysicalDevice *physical_device = physical_devices->data[i];
 
         // Check for queue families that support graphics and present.
@@ -233,8 +236,6 @@ static PhysicalDevice *find_suitable_physical_device(Graphics *graphics, CTK_Arr
                                            physical_device->queue_family_indexes.present  != CTK_U32_MAX;
 
         // Check that all requested features are supported.
-        CTK_Array<s32> unsupported_features = {};
-
         for (u32 feat_index = 0; feat_index < requested_features->count; ++feat_index)
         {
             s32 requested_feature = requested_features->data[feat_index];
@@ -250,6 +251,7 @@ static PhysicalDevice *find_suitable_physical_device(Graphics *graphics, CTK_Arr
             suitable_device = physical_device;
     }
 
+    ctk_end_region(graphics->mem.temp, fn_region);
     return suitable_device;
 }
 
