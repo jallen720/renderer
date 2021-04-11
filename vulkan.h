@@ -335,6 +335,7 @@ static void init_swapchain(Vulkan *vulkan) {
         // Prefer 4-component 8-bit BGRA unnormalized format and sRGB color space.
         if (surface_format.format == VK_FORMAT_B8G8R8A8_UNORM &&
             surface_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+
             selected_format = surface_format;
             break;
         }
@@ -474,11 +475,13 @@ static Region *allocate_region(Vulkan *vulkan, Buffer *buffer, u32 size, VkDevic
 }
 
 static Vulkan *create_vulkan(Platform *platform) {
+    static u32 const TEMP_STACK_SIZE = CTK_MEGABYTE;
+
     // Allocate memory for vulkan module.
-    CTK_Stack *base = ctk_create_stack(CTK_GIGABYTE);
+    CTK_Stack *base = ctk_create_stack(sizeof(Vulkan) + TEMP_STACK_SIZE);
     auto vulkan = ctk_alloc<Vulkan>(base, 1);
     vulkan->mem.base = base;
-    vulkan->mem.temp = ctk_create_stack(CTK_MEGABYTE, &base->allocator);
+    vulkan->mem.temp = ctk_create_stack(TEMP_STACK_SIZE, &base->allocator);
 
     u32 fn_region = ctk_begin_region(vulkan->mem.temp);
 
