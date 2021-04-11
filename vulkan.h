@@ -64,6 +64,11 @@ struct Region {
     VkDeviceSize offset;
 };
 
+struct VulkanInfo {
+    u32 max_buffers;
+    u32 max_regions;
+};
+
 struct Vulkan {
     struct {
         CTK_Stack *base;
@@ -77,6 +82,11 @@ struct Vulkan {
         PhysicalDevice physical;
         LogicalDevice logical;
     } device;
+
+    struct {
+        CTK_Pool<Region> *regions;
+        CTK_Pool<Buffer> *buffers;
+    } pools;
 
     Swapchain swapchain;
     VkCommandPool command_pool;

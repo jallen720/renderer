@@ -23,13 +23,13 @@
     <ClInclude Include="win32.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="vulkan.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="core.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="platform.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vulkan.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
