@@ -51,7 +51,7 @@ static void allocate_regions(App *app, Vulkan *vulkan) {
 static App *create_app(Vulkan *vulkan, CTK_Stack *base_mem) {
     auto app = ctk_alloc<App>(base_mem, 1);
     app->mem.base = base_mem;
-    app->mem.temp = ctk_create_stack(CTK_MEGABYTE, &base_mem->allocator);
+    app->mem.temp = ctk_create_stack(&base_mem->allocator, CTK_MEGABYTE);
 
     create_buffers(app, vulkan);
     allocate_regions(app, vulkan);

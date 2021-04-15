@@ -95,8 +95,8 @@ struct Vulkan {
 static void init_instance(Instance *instance, CTK_Stack *temp_mem) {
     u32 fn_region = ctk_begin_region(temp_mem);
 
-    auto extensions = ctk_create_array<cstr>(16, &temp_mem->allocator);
-    auto layers = ctk_create_array<cstr>(16, &temp_mem->allocator);
+    auto extensions = ctk_create_array<cstr>(&temp_mem->allocator, 16);
+    auto layers = ctk_create_array<cstr>(&temp_mem->allocator, 16);
     ctk_push(extensions, VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
     ctk_push(extensions, VK_KHR_SURFACE_EXTENSION_NAME);
     ctk_push(extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME); // Validation
@@ -184,7 +184,7 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vulkan, CTK_Array<P
     u32 fn_region = ctk_begin_region(vulkan->mem.temp);
     CTK_Array<s32> *unsupported_features =
         requested_features
-        ? ctk_create_array<s32>(requested_features->size, &vulkan->mem.temp->allocator)
+        ? ctk_create_array<s32>(&vulkan->mem.temp->allocator, requested_features->size)
         : NULL;
 
     PhysicalDevice *suitable_device = NULL;
@@ -230,7 +230,7 @@ static void load_physical_device(Vulkan *vulkan, CTK_Array<s32> *requested_featu
         vtk_load_vk_objects<VkPhysicalDevice>(&vulkan->mem.temp->allocator, vkEnumeratePhysicalDevices,
                                               vulkan->instance.handle);
 
-    auto physical_devices = ctk_create_array<PhysicalDevice>(vk_physical_devices->count, &vulkan->mem.temp->allocator);
+    auto physical_devices = ctk_create_array<PhysicalDevice>(&vulkan->mem.temp->allocator, vk_physical_devices->count);
 
     for (u32 i = 0; i < vk_physical_devices->count; ++i) {
         VkPhysicalDevice vk_physical_device = vk_physical_devices->data[i];
@@ -246,8 +246,8 @@ static void load_physical_device(Vulkan *vulkan, CTK_Array<s32> *requested_featu
     }
 
     // Sort out discrete and integrated gpus.
-    auto discrete_devices = ctk_create_array<PhysicalDevice *>(physical_devices->count, &vulkan->mem.temp->allocator);
-    auto integrated_devices = ctk_create_array<PhysicalDevice *>(physical_devices->count, &vulkan->mem.temp->allocator);
+    auto discrete_devices = ctk_create_array<PhysicalDevice *>(&vulkan->mem.temp->allocator, physical_devices->count);
+    auto integrated_devices = ctk_create_array<PhysicalDevice *>(&vulkan->mem.temp->allocator, physical_devices->count);
 
     for (u32 i = 0; i < physical_devices->count; ++i) {
         PhysicalDevice *physical_device = physical_devices->data + i;
@@ -481,8 +481,8 @@ static Vulkan *create_vulkan(Platform *platform, CTK_Stack *base_mem, VulkanInfo
     auto vulkan = ctk_alloc<Vulkan>(base_mem, 1);
     vulkan->mem.base = base_mem;
     vulkan->mem.temp = ctk_create_stack(&base_mem->allocator, TEMP_STACK_SIZE);
-    vulkan->pools.buffers = ctk_create_pool(&base_mem->allocator, info.max_buffers);
-    vulkan->pools.regions = ctk_create_pool(&base_mem->allocator, info.max_regions);
+    vulkan->pools.buffers = ctk_create_pool<Buffer>(&base_mem->allocator, info.max_buffers);
+    vulkan->pools.regions = ctk_create_pool<Region>(&base_mem->allocator, info.max_regions);
 
     u32 fn_region = ctk_begin_region(vulkan->mem.temp);
 
@@ -491,7 +491,7 @@ static Vulkan *create_vulkan(Platform *platform, CTK_Stack *base_mem, VulkanInfo
     init_surface(vulkan, platform);
 
     // Physical/Logical Devices
-    auto requested_features = ctk_create_array<s32>(2, &vulkan->mem.temp->allocator);
+    auto requested_features = ctk_create_array<s32>(&vulkan->mem.temp->allocator, 2);
     ctk_push(requested_features, (s32)VTK_PHYSICAL_DEVICE_FEATURE_geometryShader);
     load_physical_device(vulkan, requested_features);
     init_logical_device(vulkan, requested_features);
