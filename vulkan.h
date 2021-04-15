@@ -75,6 +75,11 @@ struct Vulkan {
         CTK_Stack *temp;
     } mem;
 
+    struct {
+        CTK_Pool<Region> *regions;
+        CTK_Pool<Buffer> *buffers;
+    } pools;
+
     Instance instance;
     VkSurfaceKHR surface;
 
@@ -82,11 +87,6 @@ struct Vulkan {
         PhysicalDevice physical;
         LogicalDevice logical;
     } device;
-
-    struct {
-        CTK_Pool<Region> *regions;
-        CTK_Pool<Buffer> *buffers;
-    } pools;
 
     Swapchain swapchain;
     VkCommandPool command_pool;
@@ -474,14 +474,15 @@ static Region *allocate_region(Vulkan *vulkan, Buffer *buffer, u32 size, VkDevic
     return region;
 }
 
-static Vulkan *create_vulkan(Platform *platform) {
+static Vulkan *create_vulkan(Platform *platform, CTK_Stack *base_mem, VulkanInfo info) {
     static u32 const TEMP_STACK_SIZE = CTK_MEGABYTE;
 
     // Allocate memory for vulkan module.
-    CTK_Stack *base = ctk_create_stack(sizeof(Vulkan) + TEMP_STACK_SIZE);
-    auto vulkan = ctk_alloc<Vulkan>(base, 1);
-    vulkan->mem.base = base;
-    vulkan->mem.temp = ctk_create_stack(TEMP_STACK_SIZE, &base->allocator);
+    auto vulkan = ctk_alloc<Vulkan>(base_mem, 1);
+    vulkan->mem.base = base_mem;
+    vulkan->mem.temp = ctk_create_stack(&base_mem->allocator, TEMP_STACK_SIZE);
+    vulkan->pools.buffers = ctk_create_pool(&base_mem->allocator, info.max_buffers);
+    vulkan->pools.regions = ctk_create_pool(&base_mem->allocator, info.max_regions);
 
     u32 fn_region = ctk_begin_region(vulkan->mem.temp);
 
@@ -522,8 +523,9 @@ static Buffer *create_buffer(Vulkan *vulkan, BufferInfo *buffer_info) {
     VkMemoryRequirements mem_reqs = {};
     vkGetBufferMemoryRequirements(vulkan->device.logical.handle, buffer->handle, &mem_reqs);
     buffer->mem = allocate_device_memory(vulkan, mem_reqs, buffer_info->mem_property_flags);
-    vtk_validate_result(vkBindBufferMemory(vulkan->device.logical.handle, buffer->handle, buffer->mem, 0),
-                        "failed to bind buffer memory");
+    vtk_validate_result(
+        vkBindBufferMemory(vulkan->device.logical.handle, buffer->handle, buffer->mem, 0),
+        "failed to bind buffer memory");
 
     return buffer;
 }

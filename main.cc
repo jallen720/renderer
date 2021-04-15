@@ -48,11 +48,10 @@ static void allocate_regions(App *app, Vulkan *vulkan) {
     app->regions.mesh = allocate_region(vulkan, app->buffers.device, 64, 64);
 }
 
-static App *create_app(Vulkan *vulkan) {
-    CTK_Stack *base = ctk_create_stack(CTK_GIGABYTE);
-    auto app = ctk_alloc<App>(base, 1);
-    app->mem.base = base;
-    app->mem.temp = ctk_create_stack(CTK_MEGABYTE, &base->allocator);
+static App *create_app(Vulkan *vulkan, CTK_Stack *base_mem) {
+    auto app = ctk_alloc<App>(base_mem, 1);
+    app->mem.base = base_mem;
+    app->mem.temp = ctk_create_stack(CTK_MEGABYTE, &base_mem->allocator);
 
     create_buffers(app, vulkan);
     allocate_regions(app, vulkan);
@@ -61,10 +60,15 @@ static App *create_app(Vulkan *vulkan) {
 }
 
 s32 main() {
+    // Memory
+    CTK_Stack *base_mem = ctk_create_stack(CTK_GIGABYTE);
+    CTK_Stack *vulkan_mem = ctk_create_stack(&base_mem->allocator, 8 * CTK_MEGABYTE);
+    CTK_Stack *app_mem = ctk_create_stack(&base_mem->allocator, 64 * CTK_MEGABYTE);
+
     // Init
     Platform *platform = create_platform();
-    Vulkan *vulkan = create_vulkan(platform);
-    App *app = create_app(vulkan);
+    Vulkan *vulkan = create_vulkan(platform, vulkan_mem, { .max_buffers = 2, .max_regions = 32 });
+    App *app = create_app(vulkan, app_mem);
 
     // Main Loop
     while (platform->window->open) {
