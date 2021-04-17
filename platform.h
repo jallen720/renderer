@@ -152,9 +152,9 @@ static Window *create_window(Platform *platform, WindowInfo info) {
     return window;
 }
 
-static Platform *create_platform() {
+static Platform *create_platform(CTK_Stack *base_mem) {
     // Memory
-    CTK_Stack *mem = ctk_create_stack(CTK_MEGABYTE);
+    CTK_Stack *mem = ctk_create_stack(&base_mem->allocator, CTK_MEGABYTE);
     auto platform = ctk_alloc<Platform>(mem, 1);
     platform->mem = mem;
 

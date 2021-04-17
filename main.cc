@@ -62,11 +62,11 @@ static App *create_app(Vulkan *vulkan, CTK_Stack *base_mem) {
 s32 main() {
     // Memory
     CTK_Stack *base_mem = ctk_create_stack(CTK_GIGABYTE);
-    CTK_Stack *vulkan_mem = ctk_create_stack(&base_mem->allocator, 8 * CTK_MEGABYTE);
-    CTK_Stack *app_mem = ctk_create_stack(&base_mem->allocator, 64 * CTK_MEGABYTE);
+    CTK_Stack *vulkan_mem = ctk_create_stack(&base_mem->allocator, 4 * CTK_MEGABYTE);
+    CTK_Stack *app_mem = ctk_create_stack(&base_mem->allocator, 4 * CTK_MEGABYTE);
 
     // Init
-    Platform *platform = create_platform();
+    Platform *platform = create_platform(base_mem);
     Vulkan *vulkan = create_vulkan(platform, vulkan_mem, { .max_buffers = 2, .max_regions = 32 });
     App *app = create_app(vulkan, app_mem);
 

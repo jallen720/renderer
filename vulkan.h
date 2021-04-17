@@ -456,24 +456,6 @@ static VkDeviceMemory allocate_device_memory(Vulkan *vulkan, VkMemoryRequirement
     return mem;
 }
 
-static Region *allocate_region(Vulkan *vulkan, Buffer *buffer, u32 size, VkDeviceSize align = 1) {
-    VkDeviceSize align_offset = buffer->end % align;
-
-    auto region = ctk_alloc<Region>(vulkan->mem.base, 1);
-    region->buffer = buffer;
-    region->offset = align_offset ? buffer->end - align_offset + align : buffer->end;
-
-    if (region->offset + size > buffer->size) {
-        CTK_FATAL("buffer (size=%u end=%u) cannot allocate region of size %u and alignment %u (only %u bytes left)",
-                  buffer->size, buffer->end, size, align, buffer->size - buffer->end);
-    }
-
-    region->size = size;
-    buffer->end = region->offset + region->size;
-
-    return region;
-}
-
 static Vulkan *create_vulkan(Platform *platform, CTK_Stack *base_mem, VulkanInfo info) {
     static u32 const TEMP_STACK_SIZE = CTK_MEGABYTE;
 
@@ -506,7 +488,7 @@ static Vulkan *create_vulkan(Platform *platform, CTK_Stack *base_mem, VulkanInfo
 }
 
 static Buffer *create_buffer(Vulkan *vulkan, BufferInfo *buffer_info) {
-    auto buffer = ctk_alloc<Buffer>(vulkan->mem.base, 1);
+    auto buffer = ctk_alloc(vulkan->pools.buffers);
     buffer->size = buffer_info->size;
 
     VkBufferCreateInfo info = {};
@@ -528,4 +510,36 @@ static Buffer *create_buffer(Vulkan *vulkan, BufferInfo *buffer_info) {
         "failed to bind buffer memory");
 
     return buffer;
+}
+
+static Region *allocate_region(Vulkan *vulkan, Buffer *buffer, u32 size, VkDeviceSize align = 1) {
+    VkDeviceSize align_offset = buffer->end % align;
+
+    auto region = ctk_alloc(vulkan->pools.regions);
+    region->buffer = buffer;
+    region->offset = align_offset ? buffer->end - align_offset + align : buffer->end;
+
+    if (region->offset + size > buffer->size) {
+        CTK_FATAL("buffer (size=%u end=%u) cannot allocate region of size %u and alignment %u (only %u bytes left)",
+                  buffer->size, buffer->end, size, align, buffer->size - buffer->end);
+    }
+
+    region->size = size;
+    buffer->end = region->offset + region->size;
+
+    return region;
+}
+
+static void write_to_host_region(Vulkan *vulkan, Region *region, void *data, u32 size) {
+    CTK_ASSERT(size < region->size);
+    void *mapped_mem = NULL;
+    vkMapMemory(vulkan->device.local.handle, region->buffer->mem, region->offset, size, 0, mapped_mem);
+    memcpy(mapped_mem, data, size);
+    vkMapMemory(vulkan->device.local.handle, region->buffer->mem);
+}
+
+static void write_to_device_region(Vulkan *vulkan, Region *region, Region *staging_region, void *data, u32 size) {
+    write_to_host_region(vulkan, staging_region, data, size);
+
+
 }
