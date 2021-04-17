@@ -533,9 +533,9 @@ static Region *allocate_region(Vulkan *vulkan, Buffer *buffer, u32 size, VkDevic
 static void write_to_host_region(Vulkan *vulkan, Region *region, void *data, u32 size) {
     CTK_ASSERT(size < region->size);
     void *mapped_mem = NULL;
-    vkMapMemory(vulkan->device.local.handle, region->buffer->mem, region->offset, size, 0, mapped_mem);
+    vkMapMemory(vulkan->device.logical.handle, region->buffer->mem, region->offset, size, 0, &mapped_mem);
     memcpy(mapped_mem, data, size);
-    vkMapMemory(vulkan->device.local.handle, region->buffer->mem);
+    vkUnmapMemory(vulkan->device.logical.handle, region->buffer->mem);
 }
 
 static void write_to_device_region(Vulkan *vulkan, Region *region, Region *staging_region, void *data, u32 size) {

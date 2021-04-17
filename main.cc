@@ -1,5 +1,6 @@
 #include "renderer/platform.h"
 #include "renderer/vulkan.h"
+#include "ctk/math.h"
 
 struct App {
     struct {
@@ -16,6 +17,8 @@ struct App {
         Region *staging;
         Region *mesh;
     } regions;
+
+    CTK_Array<CTK_Vector3<f32>> *vertexes;
 };
 
 static void create_buffers(App *app, Vulkan *vulkan) {
@@ -45,7 +48,7 @@ static void create_buffers(App *app, Vulkan *vulkan) {
 
 static void allocate_regions(App *app, Vulkan *vulkan) {
     app->regions.staging = allocate_region(vulkan, app->buffers.host, 64 * CTK_MEGABYTE);
-    app->regions.mesh = allocate_region(vulkan, app->buffers.device, 64, 64);
+    app->regions.mesh = allocate_region(vulkan, app->buffers.host, 64, 64);
 }
 
 static App *create_app(Vulkan *vulkan, CTK_Stack *base_mem) {
@@ -59,6 +62,15 @@ static App *create_app(Vulkan *vulkan, CTK_Stack *base_mem) {
     return app;
 }
 
+static void test_data(App *app, Vulkan *vulkan) {
+    app->vertexes = ctk_create_array<CTK_Vector3<f32>>(&app->mem.base->allocator, 64);
+    ctk_push(app->vertexes, { -0.4f, -0.4f, 0 });
+    ctk_push(app->vertexes, {  0,     0.4f, 0 });
+    ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
+
+    write_to_host_region(vulkan, app->regions.mesh, app->vertexes->data, app->vertexes->count);
+}
+
 s32 main() {
     // Memory
     CTK_Stack *base_mem = ctk_create_stack(CTK_GIGABYTE);
@@ -69,6 +81,9 @@ s32 main() {
     Platform *platform = create_platform(base_mem);
     Vulkan *vulkan = create_vulkan(platform, vulkan_mem, { .max_buffers = 2, .max_regions = 32 });
     App *app = create_app(vulkan, app_mem);
+
+    // Setup Test Data
+    test_data(app, vulkan);
 
     // Main Loop
     while (platform->window->open) {
