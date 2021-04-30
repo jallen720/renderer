@@ -63,7 +63,7 @@ struct Window {
 };
 
 struct Platform {
-    CTK_Stack *mem;
+    CTK_Stack *fixed_mem;
     HINSTANCE instance;
     Window *window;
     s32 key_map[INPUT_KEY_COUNT];
@@ -132,7 +132,7 @@ static Window *create_window(Platform *platform, WindowInfo info) {
     win_class.lpszClassName = CLASS_NAME;
     RegisterClass(&win_class);
 
-    auto window = ctk_alloc<Window>(platform->mem, 1);
+    auto window = ctk_alloc<Window>(platform->fixed_mem, 1);
     window->open = true;
     window->handle = CreateWindowEx(0,                       // Optional window styles.
                                     CLASS_NAME,              // Window class
@@ -144,6 +144,7 @@ static Window *create_window(Platform *platform, WindowInfo info) {
                                     NULL,                    // Menu
                                     platform->instance,      // Instance handle
                                     NULL);                   // Additional application data
+
     if (window->handle == NULL)
         CTK_FATAL("failed to create window")
 
@@ -152,11 +153,9 @@ static Window *create_window(Platform *platform, WindowInfo info) {
     return window;
 }
 
-static Platform *create_platform(CTK_Stack *base_mem) {
-    // Memory
-    CTK_Stack *mem = ctk_create_stack(&base_mem->allocator, CTK_MEGABYTE);
-    auto platform = ctk_alloc<Platform>(mem, 1);
-    platform->mem = mem;
+static Platform *create_platform(CTK_Stack *fixed_mem) {
+    auto platform = ctk_alloc<Platform>(fixed_mem, 1);
+    platform->fixed_mem = fixed_mem;
 
     // Instance
     platform->instance = GetModuleHandle(NULL);

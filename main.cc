@@ -4,24 +4,29 @@
 
 struct App {
     struct {
-        CTK_Stack *base;
+        CTK_Stack *fixed;
         CTK_Stack *temp;
     } mem;
 
     struct {
+        CTK_Allocator *fixed;
+        CTK_Allocator *temp;
+    } alloc;
+
+    struct {
         Buffer *host;
         Buffer *device;
-    } buffers;
+    } buffer;
 
     struct {
         Region *staging;
         Region *mesh;
-    } regions;
+    } region;
 
-    CTK_Array<CTK_Vector3<f32>> *vertexes;
+    CTK_Array<CTK_Vec3<f32>> *vertexes;
 };
 
-static void create_buffers(App *app, Vulkan *vulkan) {
+static void create_buffers(App *app, Vulkan *vk) {
     {
         BufferInfo info = {};
         info.size = 256 * CTK_MEGABYTE;
@@ -30,7 +35,7 @@ static void create_buffers(App *app, Vulkan *vulkan) {
                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         info.mem_property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        app->buffers.host = create_buffer(vulkan, &info);
+        app->buffer.host = create_buffer(vk, &info);
     }
 
     {
@@ -42,48 +47,55 @@ static void create_buffers(App *app, Vulkan *vulkan) {
                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                            VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         info.mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        app->buffers.device = create_buffer(vulkan, &info);
+        app->buffer.device = create_buffer(vk, &info);
     }
 }
 
-static void allocate_regions(App *app, Vulkan *vulkan) {
-    app->regions.staging = allocate_region(vulkan, app->buffers.host, 64 * CTK_MEGABYTE);
-    app->regions.mesh = allocate_region(vulkan, app->buffers.host, 64, 64);
+static void allocate_regions(App *app, Vulkan *vk) {
+    app->region.staging = allocate_region(vk, app->buffer.host, 64 * CTK_MEGABYTE);
+    app->region.mesh = allocate_region(vk, app->buffer.host, 64, 64);
 }
 
-static App *create_app(Vulkan *vulkan, CTK_Stack *base_mem) {
-    auto app = ctk_alloc<App>(base_mem, 1);
-    app->mem.base = base_mem;
-    app->mem.temp = ctk_create_stack(&base_mem->allocator, CTK_MEGABYTE);
+static App *create_app(CTK_Allocator *fixed_alloc, Vulkan *vk) {
+    auto app = ctk_alloc<App>(fixed_alloc, 1);
+    app->alloc.fixed = fixed_alloc;
+    app->mem.temp = ctk_create_stack(app->alloc.fixed, CTK_MEGABYTE);
+    app->alloc.temp = ctk_create_allocator(app->mem.temp);
 
-    create_buffers(app, vulkan);
-    allocate_regions(app, vulkan);
+    create_buffers(app, vk);
+    allocate_regions(app, vk);
 
     return app;
 }
 
-static void test_data(App *app, Vulkan *vulkan) {
-    app->vertexes = ctk_create_array<CTK_Vector3<f32>>(&app->mem.base->allocator, 64);
+static void test_data(App *app, Vulkan *vk) {
+    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->alloc.fixed, 64);
     ctk_push(app->vertexes, { -0.4f, -0.4f, 0 });
     ctk_push(app->vertexes, {  0,     0.4f, 0 });
     ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
 
-    write_to_host_region(vulkan, app->regions.mesh, app->vertexes->data, app->vertexes->count);
+    write_to_host_region(vk, app->region.mesh, app->vertexes->data, app->vertexes->count);
 }
 
 s32 main() {
     // Memory
     CTK_Stack *base_mem = ctk_create_stack(CTK_GIGABYTE);
-    CTK_Stack *vulkan_mem = ctk_create_stack(&base_mem->allocator, 4 * CTK_MEGABYTE);
-    CTK_Stack *app_mem = ctk_create_stack(&base_mem->allocator, 4 * CTK_MEGABYTE);
+    CTK_Allocator *base_alloc = ctk_create_allocator(base_mem);
+    CTK_Stack *platform_mem = ctk_create_stack(base_alloc, 2 * CTK_KILOBYTE);
+    CTK_Stack *vulkan_mem = ctk_create_stack(base_alloc, 4 * CTK_MEGABYTE);
 
     // Init
-    Platform *platform = create_platform(base_mem);
-    Vulkan *vulkan = create_vulkan(platform, vulkan_mem, { .max_buffers = 2, .max_regions = 32 });
-    App *app = create_app(vulkan, app_mem);
+    Platform *platform = create_platform(platform_mem);
+
+    VulkanInfo vulkan_info = {};
+    vulkan_info.max_buffers = 2;
+    vulkan_info.max_regions = 32;
+    Vulkan *vk = create_vulkan(vulkan_mem, &vulkan_info, platform);
+
+    App *app = create_app(base_alloc, vk);
 
     // Setup Test Data
-    test_data(app, vulkan);
+    test_data(app, vk);
 
     // Main Loop
     while (platform->window->open) {
