@@ -78,20 +78,23 @@ static void test_data(App *app, Vulkan *vk) {
 }
 
 s32 main() {
-    // Memory
     CTK_Stack *base_mem = ctk_create_stack(CTK_GIGABYTE);
     CTK_Allocator *base_alloc = ctk_create_allocator(base_mem);
-    CTK_Stack *platform_mem = ctk_create_stack(base_alloc, 2 * CTK_KILOBYTE);
-    CTK_Stack *vulkan_mem = ctk_create_stack(base_alloc, 4 * CTK_MEGABYTE);
 
-    // Init
-    Platform *platform = create_platform(platform_mem);
+    // Platform
+    CTK_Stack *platform_stack = ctk_create_stack(base_alloc, 2 * CTK_KILOBYTE);
+    CTK_Allocator *platform_alloc = ctk_create_allocator(platform_stack);
+    Platform *platform = create_platform(platform_alloc);
 
+    // Vulkan
+    CTK_Stack *vulkan_stack = ctk_create_stack(base_alloc, 4 * CTK_MEGABYTE);
+    CTK_Allocator *vulkan_alloc = ctk_create_allocator(vulkan_stack);
     VulkanInfo vulkan_info = {};
     vulkan_info.max_buffers = 2;
     vulkan_info.max_regions = 32;
-    Vulkan *vk = create_vulkan(vulkan_mem, &vulkan_info, platform);
+    Vulkan *vk = create_vulkan(vulkan_alloc, &vulkan_info, platform);
 
+    // App
     App *app = create_app(base_alloc, vk);
 
     // Setup Test Data
