@@ -98,6 +98,7 @@ struct VulkanInfo {
 
 struct Vulkan {
     // Memory
+    CTK_Stack *fixed_stack;
     CTK_Allocator *fixed_alloc;
     CTK_Stack *temp_stack;
     CTK_Allocator *temp_alloc;
@@ -489,14 +490,17 @@ static void init_command_pool(Vulkan *vk) {
         "failed to create command pool");
 }
 
-static Vulkan *create_vulkan(CTK_Allocator *fixed_alloc, VulkanInfo *info, Platform *platform) {
+static Vulkan *create_vulkan(CTK_Stack *fixed_stack, Platform *platform, VulkanInfo info) {
+    CTK_Allocator *fixed_alloc = ctk_create_allocator(fixed_stack);
+
     // Allocate memory for vk module.
     auto vk = ctk_alloc<Vulkan>(fixed_alloc, 1);
+    vk->fixed_stack = fixed_stack;
     vk->fixed_alloc = fixed_alloc;
     vk->temp_stack = ctk_create_stack(vk->fixed_alloc, CTK_MEGABYTE);
     vk->temp_alloc = ctk_create_allocator(vk->temp_stack);
-    vk->pool.buffer = ctk_create_pool<Buffer>(vk->fixed_alloc, info->max_buffers);
-    vk->pool.region = ctk_create_pool<Region>(vk->fixed_alloc, info->max_regions);
+    vk->pool.buffer = ctk_create_pool<Buffer>(vk->fixed_alloc, info.max_buffers);
+    vk->pool.region = ctk_create_pool<Region>(vk->fixed_alloc, info.max_regions);
 
     ctk_push_frame(vk->temp_stack);
 

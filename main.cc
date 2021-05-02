@@ -5,9 +5,13 @@
 struct App {
     CTK_Stack *fixed_stack;
     CTK_Allocator *fixed_alloc;
-
     CTK_Stack *temp_stack;
     CTK_Allocator *temp_alloc;
+
+    struct {
+        CTK_Stack *platform;
+        CTK_Stack *vulkan;
+    } module_stack;
 
     struct {
         Buffer *host;
@@ -21,6 +25,20 @@ struct App {
 
     CTK_Array<CTK_Vec3<f32>> *vertexes;
 };
+
+static App *create_app() {
+    CTK_Stack *fixed_stack = ctk_create_stack(CTK_GIGABYTE);
+
+    auto app = ctk_alloc<App>(fixed_stack, 1);
+    app->fixed_stack = fixed_stack;
+    app->fixed_alloc = ctk_create_allocator(app->fixed_stack);
+    app->temp_stack = ctk_create_stack(app->fixed_alloc, CTK_MEGABYTE);
+    app->temp_alloc = ctk_create_allocator(app->temp_stack);
+    app->module_stack.platform = ctk_create_stack(app->fixed_alloc, 2 * CTK_KILOBYTE);
+    app->module_stack.vulkan = ctk_create_stack(app->fixed_alloc, 4 * CTK_MEGABYTE);
+
+    return app;
+}
 
 static void create_buffers(App *app, Vulkan *vk) {
     {
@@ -53,7 +71,7 @@ static void allocate_regions(App *app, Vulkan *vk) {
 }
 
 static void create_test_data(App *app, Vulkan *vk) {
-    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->alloc.fixed, 64);
+    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->fixed_alloc, 64);
     ctk_push(app->vertexes, { -0.4f, -0.4f, 0 });
     ctk_push(app->vertexes, {  0,     0.4f, 0 });
     ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
@@ -66,8 +84,11 @@ static void create_render_passes(App *app, Vulkan *vk) {
         ctk_push_frame(app->temp_stack);
 
         RenderPassInfo info = {};
-
         info.attachment_descriptions = ctk_create_array<VkAttachmentDescription>(vk->temp_alloc, 1);
+        info.subpass_infos = ctk_create_array<SubpassInfo>(vk->temp_alloc, 1);
+        info.subpass_dependencies = ctk_create_array<VkSubpassDependency>(vk->temp_alloc, 1);
+        info.framebuffer_infos = ctk_create_array<FramebufferInfo>(vk->temp_alloc, 1);
+        info.clear_values = ctk_create_array<VkClearValue>(vk->temp_alloc, 1);
 
         // Swapchain Image Attachment
         ctk_push(info.attachment_descriptions, {
@@ -81,51 +102,26 @@ static void create_render_passes(App *app, Vulkan *vk) {
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
-        ctk_push(&rp_info.clear_values, { 0, 0, 0, 1 });
-
-        info.subpass_infos = ctk_create_array<SubpassInfo>(vk->temp_alloc, 1);
-        info.subpass_dependencies = ctk_create_array<VkSubpassDependency>(vk->temp_alloc, 1);
-        info.framebuffer_infos = ctk_create_array<FramebufferInfo>(vk->temp_alloc, 1);
-        info.clear_values = ctk_create_array<VkClearValue>(vk->temp_alloc, 1);
+        ctk_push(info.clear_values, { 0, 0, 0, 1 });
 
         ctk_pop_frame(app->temp_stack);
     }
 }
 
-static App *create_app(CTK_Allocator *fixed_alloc, Vulkan *vk) {
-    auto app = ctk_alloc<App>(fixed_alloc, 1);
-    app->alloc.fixed = fixed_alloc;
-    app->mem.temp = ctk_create_stack(app->alloc.fixed, CTK_MEGABYTE);
-    app->alloc.temp = ctk_create_allocator(app->mem.temp);
-
+static void init_app(App *app, Vulkan *vk) {
     create_buffers(app, vk);
     allocate_regions(app, vk);
-    create_test_data(app, vk);
     create_render_passes(app, vk);
 
-    return app;
+    create_test_data(app, vk);
 }
 
 s32 main() {
-    CTK_Stack *base_mem = ctk_create_stack(CTK_GIGABYTE);
-    CTK_Allocator *base_alloc = ctk_create_allocator(base_mem);
+    App *app = create_app();
+    Platform *platform = create_platform(app->module_stack.platform);
+    Vulkan *vk = create_vulkan(app->module_stack.vulkan, platform, { .max_buffers = 2, .max_regions = 32 });
 
-    // Platform
-    CTK_Stack *platform_stack = ctk_create_stack(base_alloc, 2 * CTK_KILOBYTE);
-    CTK_Allocator *platform_alloc = ctk_create_allocator(platform_stack);
-    Platform *platform = create_platform(platform_alloc);
-
-    // Vulkan
-    CTK_Stack *vulkan_stack = ctk_create_stack(base_alloc, 4 * CTK_MEGABYTE);
-    CTK_Allocator *vulkan_alloc = ctk_create_allocator(vulkan_stack);
-
-    VulkanInfo vulkan_info = {};
-    vulkan_info.max_buffers = 2;
-    vulkan_info.max_regions = 32;
-    Vulkan *vk = create_vulkan(vulkan_alloc, &vulkan_info, platform);
-
-    // App
-    App *app = create_app(base_alloc, vk);
+    init_app(app, vk);
 
     // Main Loop
     while (platform->window->open) {
