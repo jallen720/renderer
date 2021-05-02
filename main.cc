@@ -3,15 +3,12 @@
 #include "ctk/math.h"
 
 struct App {
-    CTK_Stack *fixed_stack;
-    CTK_Allocator *fixed_alloc;
-    CTK_Stack *temp_stack;
-    CTK_Allocator *temp_alloc;
-
     struct {
-        CTK_Stack *platform;
-        CTK_Stack *vulkan;
-    } module_stack;
+        CTK_Allocator *fixed;
+        CTK_Allocator *temp;
+        CTK_Allocator *platform;
+        CTK_Allocator *vulkan;
+    } mem;
 
     struct {
         Buffer *host;
@@ -27,15 +24,13 @@ struct App {
 };
 
 static App *create_app() {
-    CTK_Stack *fixed_stack = ctk_create_stack(CTK_GIGABYTE);
+    CTK_Allocator *fixed_mem = ctk_create_stack_allocator(CTK_GIGABYTE);
 
-    auto app = ctk_alloc<App>(fixed_stack, 1);
-    app->fixed_stack = fixed_stack;
-    app->fixed_alloc = ctk_create_allocator(app->fixed_stack);
-    app->temp_stack = ctk_create_stack(app->fixed_alloc, CTK_MEGABYTE);
-    app->temp_alloc = ctk_create_allocator(app->temp_stack);
-    app->module_stack.platform = ctk_create_stack(app->fixed_alloc, 2 * CTK_KILOBYTE);
-    app->module_stack.vulkan = ctk_create_stack(app->fixed_alloc, 4 * CTK_MEGABYTE);
+    auto app = ctk_alloc<App>(fixed_mem, 1);
+    app->mem.fixed      = fixed_mem;
+    app->mem.temp       = ctk_create_stack_allocator(app->mem.fixed, CTK_MEGABYTE);
+    app->mem.platform   = ctk_create_stack_allocator(app->mem.fixed, 2 * CTK_KILOBYTE);
+    app->mem.vulkan     = ctk_create_stack_allocator(app->mem.fixed, 4 * CTK_MEGABYTE);
 
     return app;
 }
@@ -71,7 +66,7 @@ static void allocate_regions(App *app, Vulkan *vk) {
 }
 
 static void create_test_data(App *app, Vulkan *vk) {
-    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->fixed_alloc, 64);
+    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->mem.fixed, 64);
     ctk_push(app->vertexes, { -0.4f, -0.4f, 0 });
     ctk_push(app->vertexes, {  0,     0.4f, 0 });
     ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
@@ -81,14 +76,14 @@ static void create_test_data(App *app, Vulkan *vk) {
 
 static void create_render_passes(App *app, Vulkan *vk) {
     {
-        ctk_push_frame(app->temp_stack);
+        ctk_push_frame(app->mem.temp);
 
         RenderPassInfo info = {};
-        info.attachment_descriptions = ctk_create_array<VkAttachmentDescription>(vk->temp_alloc, 1);
-        info.subpass_infos = ctk_create_array<SubpassInfo>(vk->temp_alloc, 1);
-        info.subpass_dependencies = ctk_create_array<VkSubpassDependency>(vk->temp_alloc, 1);
-        info.framebuffer_infos = ctk_create_array<FramebufferInfo>(vk->temp_alloc, 1);
-        info.clear_values = ctk_create_array<VkClearValue>(vk->temp_alloc, 1);
+        info.attachment_descriptions = ctk_create_array<VkAttachmentDescription>(vk->mem.temp, 1);
+        info.subpass_infos = ctk_create_array<SubpassInfo>(vk->mem.temp, 1);
+        info.subpass_dependencies = ctk_create_array<VkSubpassDependency>(vk->mem.temp, 1);
+        info.framebuffer_infos = ctk_create_array<FramebufferInfo>(vk->mem.temp, 1);
+        info.clear_values = ctk_create_array<VkClearValue>(vk->mem.temp, 1);
 
         // Swapchain Image Attachment
         ctk_push(info.attachment_descriptions, {
@@ -104,7 +99,7 @@ static void create_render_passes(App *app, Vulkan *vk) {
         });
         ctk_push(info.clear_values, { 0, 0, 0, 1 });
 
-        ctk_pop_frame(app->temp_stack);
+        ctk_pop_frame(app->mem.temp);
     }
 }
 
@@ -118,8 +113,8 @@ static void init_app(App *app, Vulkan *vk) {
 
 s32 main() {
     App *app = create_app();
-    Platform *platform = create_platform(app->module_stack.platform);
-    Vulkan *vk = create_vulkan(app->module_stack.vulkan, platform, { .max_buffers = 2, .max_regions = 32 });
+    Platform *platform = create_platform(app->mem.platform);
+    Vulkan *vk = create_vulkan(app->mem.vulkan, platform, { .max_buffers = 2, .max_regions = 32 });
 
     init_app(app, vk);
 

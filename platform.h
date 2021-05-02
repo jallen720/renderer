@@ -63,18 +63,18 @@ struct Window {
 };
 
 struct Platform {
-    CTK_Stack *fixed_stack;
+    CTK_Allocator *module_mem;
     HINSTANCE instance;
     Window *window;
     s32 key_map[INPUT_KEY_COUNT];
 };
 
 static WindowInfo const PLATFORM_DEFAULT_WINDOW_INFO = {
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    CW_USEDEFAULT,
-    L"win32 window",
+    .x = CW_USEDEFAULT,
+    .y = CW_USEDEFAULT,
+    .width = CW_USEDEFAULT,
+    .height = CW_USEDEFAULT,
+    .title = L"win32 window",
 };
 
 // Windows used by window_callback().
@@ -132,7 +132,7 @@ static Window *create_window(Platform *platform, WindowInfo info) {
     win_class.lpszClassName = CLASS_NAME;
     RegisterClass(&win_class);
 
-    auto window = ctk_alloc<Window>(platform->fixed_stack, 1);
+    auto window = ctk_alloc<Window>(platform->module_mem, 1);
     window->open = true;
     window->handle = CreateWindowEx(0,                       // Optional window styles.
                                     CLASS_NAME,              // Window class
@@ -153,9 +153,9 @@ static Window *create_window(Platform *platform, WindowInfo info) {
     return window;
 }
 
-static Platform *create_platform(CTK_Stack *fixed_stack) {
-    auto platform = ctk_alloc<Platform>(fixed_stack, 1);
-    platform->fixed_stack = fixed_stack;
+static Platform *create_platform(CTK_Allocator *module_mem) {
+    auto platform = ctk_alloc<Platform>(module_mem, 1);
+    platform->module_mem = module_mem;
 
     // Instance
     platform->instance = GetModuleHandle(NULL);
