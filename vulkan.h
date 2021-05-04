@@ -71,25 +71,33 @@ struct SubpassInfo {
     VkAttachmentReference *depth_attachment_reference;
 };
 
-struct FramebufferInfo {
-    CTK_Array<VkImageView> *attachments;
-    VkExtent2D extent;
-    u32 layers;
+struct AttachmentInfo {
+    VkAttachmentDescription description;
+    VkClearValue clear_value;
 };
 
 struct RenderPassInfo {
-    CTK_Array<VkAttachmentDescription> *attachment_descriptions;
-    CTK_Array<SubpassInfo> *subpass_infos;
-    CTK_Array<VkSubpassDependency> *subpass_dependencies;
-    CTK_Array<FramebufferInfo> *framebuffer_infos;
-    CTK_Array<VkClearValue> *clear_values;
+    struct {
+        CTK_Array<VkAttachmentDescription> *descriptions;
+        CTK_Array<VkClearValue> *clear_values;
+    } attachment;
+
+    struct {
+        CTK_Array<SubpassInfo> *infos;
+        CTK_Array<VkSubpassDependency> *dependencies;
+    } subpass;
 };
 
 struct RenderPass {
     VkRenderPass handle;
-    CTK_Array<VkClearValue> *clear_values;
-    CTK_Array<VkFramebuffer> *framebuffers;
+    CTK_Array<VkClearValue> *attachment_clear_values;
 };
+
+// struct FramebufferInfo {
+//     CTK_Array<VkImageView> *attachments;
+//     VkExtent2D extent;
+//     u32 layers;
+// };
 
 struct VulkanInfo {
     u32 max_buffers;
@@ -123,16 +131,6 @@ struct Vulkan {
 static void init_instance(Vulkan *vk) {
     Instance *instance = &vk->instance;
 
-    cstr extensions[] = {
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME, // Validation
-    };
-
-    cstr layers[] = {
-        "VK_LAYER_KHRONOS_validation", // Validation
-    };
-
     VkDebugUtilsMessengerCreateInfoEXT debug_messenger_info = {};
     debug_messenger_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     debug_messenger_info.pNext = NULL;
@@ -155,6 +153,16 @@ static void init_instance(Vulkan *vk) {
     app_info.pEngineName = "renderer";
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.apiVersion = VK_API_VERSION_1_0;
+
+    cstr extensions[] = {
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME, // Validation
+    };
+
+    cstr layers[] = {
+        "VK_LAYER_KHRONOS_validation", // Validation
+    };
 
     VkInstanceCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -592,51 +600,51 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
     ctk_push_frame(vk->mem.temp);
 
     auto render_pass = ctk_alloc<RenderPass>(vk->mem.module, 1);
-    render_pass->clear_values = ctk_create_array<VkClearValue>(vk->mem.module, info->clear_values->count);
-    render_pass->framebuffers = ctk_create_array<VkFramebuffer>(vk->mem.module, info->framebuffer_infos->count);
+    render_pass->attachment_clear_values =
+        ctk_create_array<VkClearValue>(vk->mem.module, info->attachment.clear_values->count);
 
     // Clear Values
-    ctk_concat(render_pass->clear_values, info->clear_values->data, info->clear_values->count);
+    ctk_concat(render_pass->attachment_clear_values, info->attachment.clear_values);
 
     // Subpass Descriptions
-    auto subpass_descriptions = ctk_create_array<VkSubpassDescription>(vk->mem.temp, info->subpass_infos->count);
-    for (u32 i = 0; i < info->subpass_infos->count; ++i) {
-        SubpassInfo *subpass_info = info->subpass_infos->data + i;
+    auto subpass_descriptions = ctk_create_array<VkSubpassDescription>(vk->mem.temp, info->subpass.infos->count);
+    for (u32 i = 0; i < info->subpass.infos->count; ++i) {
+        SubpassInfo *subpass_info = info->subpass.infos->data + i;
         VkSubpassDescription *description = ctk_push(subpass_descriptions);
         description->pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        description->inputAttachmentCount =     subpass_info->input_attachment_references->count;
-        description->pInputAttachments =        subpass_info->input_attachment_references->data;
-        description->colorAttachmentCount =     subpass_info->color_attachment_references->count;
-        description->pColorAttachments =        subpass_info->color_attachment_references->data;
-        description->preserveAttachmentCount =  subpass_info->preserve_attachment_indexes->count;
-        description->pPreserveAttachments =     subpass_info->preserve_attachment_indexes->data;
-        description->pResolveAttachments =      NULL;
-        description->pDepthStencilAttachment =  subpass_info->depth_attachment_reference;
+
+        if (subpass_info->input_attachment_references) {
+            description->inputAttachmentCount = subpass_info->input_attachment_references->count;
+            description->pInputAttachments = subpass_info->input_attachment_references->data;
+        }
+
+        if (subpass_info->color_attachment_references) {
+            description->colorAttachmentCount = subpass_info->color_attachment_references->count;
+            description->pColorAttachments = subpass_info->color_attachment_references->data;
+        }
+
+        if (subpass_info->preserve_attachment_indexes) {
+            description->preserveAttachmentCount = subpass_info->preserve_attachment_indexes->count;
+            description->pPreserveAttachments = subpass_info->preserve_attachment_indexes->data;
+        }
+
+        description->pResolveAttachments = NULL;
+        description->pDepthStencilAttachment = subpass_info->depth_attachment_reference;
     }
 
     // Render Pass
     VkRenderPassCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    create_info.attachmentCount =   info->attachment_descriptions->count;
-    create_info.pAttachments =      info->attachment_descriptions->data;
+    create_info.attachmentCount =   info->attachment.descriptions->count;
+    create_info.pAttachments =      info->attachment.descriptions->data;
     create_info.subpassCount =      subpass_descriptions->count;
     create_info.pSubpasses =        subpass_descriptions->data;
-    create_info.dependencyCount =   info->subpass_dependencies->count;
-    create_info.pDependencies =     info->subpass_dependencies->data;
+    create_info.dependencyCount =   info->subpass.dependencies->count;
+    create_info.pDependencies =     info->subpass.dependencies->data;
     vtk_validate_result(vkCreateRenderPass(vk->device.logical.handle, &create_info, NULL, &render_pass->handle),
                         "failed to create render pass");
 
-    // // Framebuffers
-    // u32 framebuffer_count = info->framebuffer_infos->count;
-    // for (u32 i = 0; i < framebuffer_count; ++i) {
-    //     ctk_push(
-    //         render_pass->framebuffers,
-    //         vtk_create_framebuffer(vk->device.logical.handle, render_pass->handle, info->framebuffer_infos->data + i));
-    // }
-
-    // Cleanup
     ctk_pop_frame(vk->mem.temp);
-
     return render_pass;
 }
 
