@@ -93,11 +93,11 @@ struct RenderPass {
     CTK_Array<VkClearValue> *attachment_clear_values;
 };
 
-// struct FramebufferInfo {
-//     CTK_Array<VkImageView> *attachments;
-//     VkExtent2D extent;
-//     u32 layers;
-// };
+struct FramebufferInfo {
+    CTK_Array<VkImageView> *attachments;
+    VkExtent2D extent;
+    u32 layers;
+};
 
 struct VulkanInfo {
     u32 max_buffers;
@@ -193,7 +193,7 @@ static void init_surface(Vulkan *vk, Platform *platform) {
 static QueueFamilyIndexes find_queue_family_indexes(Vulkan *vk, VkPhysicalDevice physical_device) {
     ctk_push_frame(vk->mem.temp);
 
-    QueueFamilyIndexes queue_family_indexes = { CTK_U32_MAX, CTK_U32_MAX };
+    QueueFamilyIndexes queue_family_indexes = { .graphics = CTK_U32_MAX, .present = CTK_U32_MAX };
     auto queue_family_props_array =
         vtk_load_vk_objects<VkQueueFamilyProperties>(
             vk->mem.temp,
