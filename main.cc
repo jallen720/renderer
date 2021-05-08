@@ -121,6 +121,7 @@ static void create_render_passes(App *app, Vulkan *vk) {
             .clear_value = { 0, 0, 0, 1 },
         });
 
+        // Subpasses
         SubpassInfo *subpass_info = ctk_push(info.subpass.infos);
         subpass_info->color_attachment_references = ctk_create_array<VkAttachmentReference>(app->mem.temp, 1);
         ctk_push(subpass_info->color_attachment_references, {
@@ -134,20 +135,27 @@ static void create_render_passes(App *app, Vulkan *vk) {
     }
 }
 
-static void init_app(App *app, Vulkan *vk) {
-    create_buffers(app, vk);
-    allocate_regions(app, vk);
-    create_render_passes(app, vk);
-
-    create_test_data(app, vk);
-}
 
 s32 main() {
     App *app = create_app();
-    Platform *platform = create_platform(app->mem.platform);
+    Platform *platform = create_platform(app->mem.platform, {
+        .surface {
+            .x = 2560 - 1920,
+            .y = 60,
+            .width = 1920,//CW_USEDEFAULT,
+            .height = 1080,//CW_USEDEFAULT,
+        },
+        .title = L"Renderer",
+    });
     Vulkan *vk = create_vulkan(app->mem.vulkan, platform, { .max_buffers = 2, .max_regions = 32 });
 
-    init_app(app, vk);
+    // Initialization
+    create_buffers(app, vk);
+    allocate_regions(app, vk);
+    create_render_passes(app, vk);
+    create_framebuffers(app, vk);
+
+    create_test_data(app, vk);
 
     // Main Loop
     while (platform->window->open) {
