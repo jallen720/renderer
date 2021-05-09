@@ -44,18 +44,6 @@ struct App {
     CTK_Array<CTK_Vec3<f32>> *vertexes;
 };
 
-static App *create_app() {
-    CTK_Allocator *fixed_mem = ctk_create_stack_allocator(1 * CTK_GIGABYTE);
-
-    auto app = ctk_alloc<App>(fixed_mem, 1);
-    app->mem.fixed      = fixed_mem;
-    app->mem.temp       = ctk_create_stack_allocator(app->mem.fixed, CTK_MEGABYTE);
-    app->mem.platform   = ctk_create_stack_allocator(app->mem.fixed, 2 * CTK_KILOBYTE);
-    app->mem.vulkan     = ctk_create_stack_allocator(app->mem.fixed, 4 * CTK_MEGABYTE);
-
-    return app;
-}
-
 static void create_buffers(App *app, Vulkan *vk) {
     {
         BufferInfo info = {};
@@ -196,12 +184,20 @@ static void create_pipelines(App *app, Vulkan *vk) {
 }
 
 s32 main() {
-    App *app = create_app();
+    // Create App.
+    CTK_Allocator *fixed_mem = ctk_create_stack_allocator(1 * CTK_GIGABYTE);
+    auto app = ctk_alloc<App>(fixed_mem, 1);
+    app->mem.fixed    = fixed_mem;
+    app->mem.temp     = ctk_create_stack_allocator(app->mem.fixed, CTK_MEGABYTE);
+    app->mem.platform = ctk_create_stack_allocator(app->mem.fixed, 2 * CTK_KILOBYTE);
+    app->mem.vulkan   = ctk_create_stack_allocator(app->mem.fixed, 4 * CTK_MEGABYTE);
+
+    // Create Modules
     Platform *platform = create_platform(app->mem.platform, {
         .surface = {
-            .x = 2560 - 1920,   // Right Align
-            .y = 60,            // Align to Top Taskbar
-            .width = 1920,
+            .x      = 2560 - 1920,   // Right Align
+            .y      = 60,            // Align to Top Taskbar
+            .width  = 1920,
             .height = 1080,
         },
         .title = L"Renderer",
