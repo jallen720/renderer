@@ -38,7 +38,7 @@ struct App {
     } shader;
 
     struct {
-        Pipeline direct;
+        Pipeline *direct;
     } pipeline;
 
     CTK_Array<CTK_Vec3<f32>> *vertexes;
@@ -177,7 +177,12 @@ static void create_pipelines(App *app, Vulkan *vk) {
     {
         ctk_push_frame(vk->mem.temp);
 
+        PipelineInfo info = DEFAULT_PIPELINE_INFO;
+        info.shaders = ctk_create_array<Shader *>(vk->mem.temp, 2);
+        ctk_push(info.shaders, app->shader.triangle.vert);
+        ctk_push(info.shaders, app->shader.triangle.frag);
 
+        app->pipeline.direct = create_pipeline(vk, app->render_pass.main, 0, &info);
 
         ctk_pop_frame(vk->mem.temp);
     }
@@ -202,7 +207,16 @@ s32 main() {
         },
         .title = L"Renderer",
     });
-    Vulkan *vk = create_vulkan(app->mem.vulkan, platform, { .max_buffers = 2, .max_regions = 32 });
+
+    Vulkan *vk = create_vulkan(app->mem.vulkan, platform, {
+        .max = {
+            .buffers       = 2,
+            .regions       = 32,
+            .render_passes = 2,
+            .shaders       = 16,
+            .pipelines     = 8,
+        },
+    });
 
     // Initialization
     create_buffers(app, vk);
