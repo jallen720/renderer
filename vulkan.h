@@ -4,6 +4,7 @@
 #include "ctk/ctk.h"
 #include "ctk/memory.h"
 #include "ctk/containers.h"
+#include "ctk/file.h"
 #include "vtk/vtk.h"
 #include "vtk/device_features.h"
 #include "renderer/platform.h"
@@ -11,6 +12,11 @@
 struct Instance {
     VkInstance handle;
     VkDebugUtilsMessengerEXT debug_messenger;
+};
+
+struct Surface {
+    VkSurfaceKHR handle;
+    VkSurfaceCapabilitiesKHR capabilities;
 };
 
 struct QueueFamilyIndexes {
@@ -99,6 +105,11 @@ struct FramebufferInfo {
     u32 layers;
 };
 
+struct Shader {
+    VkShaderModule handle;
+    VkShaderStageFlagBits stage;
+};
+
 struct VulkanInfo {
     u32 max_buffers;
     u32 max_regions;
@@ -117,7 +128,7 @@ struct Vulkan {
 
     // State
     Instance instance;
-    VkSurfaceKHR surface;
+    Surface surface;
 
     struct {
         PhysicalDevice physical;
@@ -186,7 +197,7 @@ static void init_surface(Vulkan *vk, Platform *platform) {
     info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     info.hwnd = platform->window->handle;
     info.hinstance = platform->instance;
-    vtk_validate_result(vkCreateWin32SurfaceKHR(vk->instance.handle, &info, nullptr, &vk->surface),
+    vtk_validate_result(vkCreateWin32SurfaceKHR(vk->instance.handle, &info, nullptr, &vk->surface.handle),
                         "failed to get win32 surface");
 }
 
@@ -206,7 +217,7 @@ static QueueFamilyIndexes find_queue_family_indexes(Vulkan *vk, VkPhysicalDevice
             queue_family_indexes.graphics = queue_family_index;
 
         VkBool32 present_supported = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, vk->surface, &present_supported);
+        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, vk->surface.handle, &present_supported);
         if (present_supported == VK_TRUE)
             queue_family_indexes.present = queue_family_index;
     }
@@ -345,6 +356,15 @@ static void init_logical_device(Vulkan *vk, CTK_Array<s32> *requested_features) 
                      &vk->device.logical.queue.present);
 }
 
+static void update_surface_properties(Vulkan *vk) {
+    vtk_validate_result(
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+            vk->device.physical.handle,
+            vk->surface.handle,
+            &vk->surface.capabilities),
+        "failed to get physical device surface capabilities");
+}
+
 static void init_swapchain(Vulkan *vk) {
     ctk_push_frame(vk->mem.temp);
 
@@ -358,19 +378,14 @@ static void init_swapchain(Vulkan *vk) {
             vk->mem.temp,
             vkGetPhysicalDeviceSurfaceFormatsKHR,
             vk->device.physical.handle,
-            vk->surface);
+            vk->surface.handle);
 
     auto surface_present_modes =
         vtk_load_vk_objects<VkPresentModeKHR>(
             vk->mem.temp,
             vkGetPhysicalDeviceSurfacePresentModesKHR,
             vk->device.physical.handle,
-            vk->surface);
-
-    VkSurfaceCapabilitiesKHR surface_capabilities = {};
-    vtk_validate_result(
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk->device.physical.handle, vk->surface, &surface_capabilities),
-        "failed to get physical device surface capabilities");
+            vk->surface.handle);
 
     // Default to first surface format.
     VkSurfaceFormatKHR selected_format = surface_formats->data[0];
@@ -399,12 +414,12 @@ static void init_swapchain(Vulkan *vk) {
     }
 
     // Set image count to min image count + 1 or max image count (whichever is smaller).
-    u32 selected_image_count = surface_capabilities.minImageCount + 1;
-    if (surface_capabilities.maxImageCount > 0 && selected_image_count > surface_capabilities.maxImageCount)
-        selected_image_count = surface_capabilities.maxImageCount;
+    u32 selected_image_count = vk->surface.capabilities.minImageCount + 1;
+    if (vk->surface.capabilities.maxImageCount > 0 && selected_image_count > vk->surface.capabilities.maxImageCount)
+        selected_image_count = vk->surface.capabilities.maxImageCount;
 
     // Verify current extent has been set for surface.
-    if (surface_capabilities.currentExtent.width == UINT32_MAX)
+    if (vk->surface.capabilities.currentExtent.width == UINT32_MAX)
         CTK_FATAL("current extent not set for surface")
 
     ////////////////////////////////////////////////////////////
@@ -419,16 +434,16 @@ static void init_swapchain(Vulkan *vk) {
 
     VkSwapchainCreateInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    info.surface = vk->surface;
+    info.surface = vk->surface.handle;
     info.flags = 0;
     info.minImageCount = selected_image_count;
     info.imageFormat = selected_format.format;
     info.imageColorSpace = selected_format.colorSpace;
-    info.imageExtent = surface_capabilities.currentExtent;
+    info.imageExtent = vk->surface.capabilities.currentExtent;
     info.imageArrayLayers = 1; // Always 1 for standard images.
     info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    info.preTransform = surface_capabilities.currentTransform;
+    info.preTransform = vk->surface.capabilities.currentTransform;
     info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     info.presentMode = selected_present_mode;
     info.clipped = VK_TRUE;
@@ -448,7 +463,7 @@ static void init_swapchain(Vulkan *vk) {
 
     // Store surface state used to create swapchain for future reference.
     vk->swapchain.image_format = selected_format.format;
-    vk->swapchain.extent = surface_capabilities.currentExtent;
+    vk->swapchain.extent = vk->surface.capabilities.currentExtent;
 
     ////////////////////////////////////////////////////////////
     /// Image View Creation
@@ -462,6 +477,7 @@ static void init_swapchain(Vulkan *vk) {
 
     CTK_ASSERT(swapchain_images->count <= ctk_size(&vk->swapchain.image_views));
     vk->swapchain.image_views.count = swapchain_images->count;
+    vk->swapchain.image_count = swapchain_images->count;
 
     for (u32 i = 0; i < swapchain_images->count; ++i) {
         VkImageViewCreateInfo view_info = {};
@@ -517,12 +533,13 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     load_physical_device(vk, requested_features);
     init_logical_device(vk, requested_features);
 
+    // Update surface capabilities for loaded physical device.
+    update_surface_properties(vk);
+
     init_swapchain(vk);
     init_command_pool(vk);
 
-    // Cleanup
     ctk_pop_frame(vk->mem.temp);
-
     return vk;
 }
 
@@ -646,6 +663,39 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
 
     ctk_pop_frame(vk->mem.temp);
     return render_pass;
+}
+
+static VkFramebuffer create_framebuffer(VkDevice logical_device, VkRenderPass rp, FramebufferInfo *info) {
+    VkFramebufferCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    create_info.renderPass = rp;
+    create_info.attachmentCount = info->attachments->count;
+    create_info.pAttachments = info->attachments->data;
+    create_info.width = info->extent.width;
+    create_info.height = info->extent.height;
+    create_info.layers = info->layers;
+    VkFramebuffer fb = VK_NULL_HANDLE;
+    vtk_validate_result(vkCreateFramebuffer(logical_device, &create_info, NULL, &fb), "failed to create framebuffer");
+    return fb;
+}
+
+static Shader *create_shader(Vulkan *vk, cstr spirv_path, VkShaderStageFlagBits stage) {
+    ctk_push_frame(vk->mem.temp);
+
+    auto shader = ctk_alloc<Shader>(vk->mem.module, 1);
+    shader->stage = stage;
+
+    CTK_Array<u8> *byte_code = ctk_read_file<u8>(vk->mem.temp, spirv_path);
+    VkShaderModuleCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    info.flags = 0;
+    info.codeSize = ctk_byte_size(byte_code);
+    info.pCode = (u32 const *)byte_code->data;
+    vtk_validate_result(vkCreateShaderModule(vk->device.logical.handle, &info, NULL, &shader->handle),
+                        "failed to create shader from SPIR-V bytecode in \"%p\"", spirv_path);
+
+    ctk_pop_frame(vk->mem.temp);
+    return shader;
 }
 
 ////////////////////////////////////////////////////////////

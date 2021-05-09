@@ -2,6 +2,11 @@
 #include "renderer/vulkan.h"
 #include "ctk/math.h"
 
+struct ShaderGroup {
+    Shader *vert;
+    Shader *frag;
+};
+
 struct App {
     struct {
         CTK_Allocator *fixed;
@@ -22,7 +27,15 @@ struct App {
 
     struct {
         RenderPass *main;
-    } render_passes;
+    } render_pass;
+
+    struct {
+        CTK_Array<VkFramebuffer> *swapchain;
+    } framebuffer;
+
+    struct {
+        ShaderGroup triangle;
+    } shader;
 
     CTK_Array<CTK_Vec3<f32>> *vertexes;
 };
@@ -129,21 +142,57 @@ static void create_render_passes(App *app, Vulkan *vk) {
             .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
 
-        app->render_passes.main = create_render_pass(vk, &info);
+        app->render_pass.main = create_render_pass(vk, &info);
 
         ctk_pop_frame(app->mem.temp);
     }
 }
 
+static void create_framebuffers(App *app, Vulkan *vk) {
+    {
+        app->framebuffer.swapchain = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+
+        // Create framebuffer for each swapchain image.
+        for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
+            ctk_push_frame(app->mem.temp);
+
+            FramebufferInfo info = {
+                .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
+                .extent = vk->surface.capabilities.currentExtent,
+                .layers = 1,
+            };
+
+            ctk_push(info.attachments, vk->swapchain.image_views[i]);
+
+            ctk_push(app->framebuffer.swapchain,
+                create_framebuffer(vk->device.logical.handle, app->render_pass.main->handle, &info));
+
+            ctk_pop_frame(app->mem.temp);
+        }
+    }
+}
+
+static void create_shaders(App *app, Vulkan *vk) {
+    app->shader = {
+        .triangle = {
+            .vert = create_shader(vk, "data/shaders/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            .frag = create_shader(vk, "data/shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
+        },
+    };
+}
+
+static void create_pipelines(App *app, Vulkan *vk) {
+
+}
 
 s32 main() {
     App *app = create_app();
     Platform *platform = create_platform(app->mem.platform, {
-        .surface {
-            .x = 2560 - 1920,
-            .y = 60,
-            .width = 1920,//CW_USEDEFAULT,
-            .height = 1080,//CW_USEDEFAULT,
+        .surface = {
+            .x = 2560 - 1920,   // Right Align
+            .y = 60,            // Align to Top Taskbar
+            .width = 1920,
+            .height = 1080,
         },
         .title = L"Renderer",
     });
@@ -154,6 +203,8 @@ s32 main() {
     allocate_regions(app, vk);
     create_render_passes(app, vk);
     create_framebuffers(app, vk);
+    create_shaders(app, vk);
+    create_pipelines(app, vk);
 
     create_test_data(app, vk);
 
