@@ -37,6 +37,10 @@ struct App {
         ShaderGroup triangle;
     } shader;
 
+    struct {
+        Pipeline direct;
+    } pipeline;
+
     CTK_Array<CTK_Vec3<f32>> *vertexes;
 };
 
@@ -182,7 +186,13 @@ static void create_shaders(App *app, Vulkan *vk) {
 }
 
 static void create_pipelines(App *app, Vulkan *vk) {
+    {
+        ctk_push_frame(vk->mem.temp);
 
+
+
+        ctk_pop_frame(vk->mem.temp);
+    }
 }
 
 s32 main() {

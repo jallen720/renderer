@@ -110,12 +110,17 @@ struct Shader {
     VkShaderStageFlagBits stage;
 };
 
+struct Pipeline {
+    VkPipeline handle;
+};
+
 struct VulkanInfo {
     u32 max_buffers;
     u32 max_regions;
 };
 
 struct Vulkan {
+    // Memory
     struct {
         CTK_Allocator *module;
         CTK_Allocator *temp;
@@ -356,7 +361,7 @@ static void init_logical_device(Vulkan *vk, CTK_Array<s32> *requested_features) 
                      &vk->device.logical.queue.present);
 }
 
-static void update_surface_properties(Vulkan *vk) {
+static void update_surface_capabilities(Vulkan *vk) {
     vtk_validate_result(
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
             vk->device.physical.handle,
@@ -534,7 +539,7 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     init_logical_device(vk, requested_features);
 
     // Update surface capabilities for loaded physical device.
-    update_surface_properties(vk);
+    update_surface_capabilities(vk);
 
     init_swapchain(vk);
     init_command_pool(vk);
