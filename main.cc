@@ -38,6 +38,14 @@ struct App {
     } shader;
 
     struct {
+        VkDescriptorPool pool;
+
+        struct {
+            VkDescriptorSetLayout triangle;
+        } set_layout;
+    } descriptor;
+
+    struct {
         Pipeline *direct;
     } pipeline;
 
@@ -55,7 +63,6 @@ static void create_buffers(App *app, Vulkan *vk) {
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         app->buffer.host = create_buffer(vk, &info);
     }
-
     {
         BufferInfo info = {};
         info.size = 256 * CTK_MEGABYTE;
@@ -131,7 +138,7 @@ static void create_render_passes(App *app, Vulkan *vk) {
         subpass_info->color_attachment_references = ctk_create_array<VkAttachmentReference>(app->mem.temp, 1);
         ctk_push(subpass_info->color_attachment_references, {
             .attachment = swapchain_attachment_index,
-            .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
 
         app->render_pass.main = create_render_pass(vk, &info);
@@ -150,8 +157,8 @@ static void create_framebuffers(App *app, Vulkan *vk) {
 
             FramebufferInfo info = {
                 .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
-                .extent = vk->surface.capabilities.currentExtent,
-                .layers = 1,
+                .extent      = get_surface_extent(vk),
+                .layers      = 1,
             };
 
             ctk_push(info.attachments, vk->swapchain.image_views[i]);
@@ -177,15 +184,39 @@ static void create_pipelines(App *app, Vulkan *vk) {
     {
         ctk_push_frame(vk->mem.temp);
 
+        VkExtent2D surface_extent = get_surface_extent(vk);
+
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
-        info.shaders = ctk_create_array<Shader *>(vk->mem.temp, 2);
-        ctk_push(info.shaders, app->shader.triangle.vert);
-        ctk_push(info.shaders, app->shader.triangle.frag);
+        ctk_push(&info.shaders, app->shader.triangle.vert);
+        ctk_push(&info.viewports, {
+            .x        = 0,
+            .y        = 0,
+            .width    = (f32)surface_extent.width,
+            .height   = (f32)surface_extent.height,
+            .minDepth = 1,
+            .maxDepth = 0,
+        });
+        ctk_push(&info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
+        ctk_push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
         app->pipeline.direct = create_pipeline(vk, app->render_pass.main, 0, &info);
 
         ctk_pop_frame(vk->mem.temp);
     }
+}
+
+static void create_descriptor_sets(App *app, Vulkan *vk) {
+    app->descriptor.pool = create_descriptor_pool(vk, {
+        .descriptor_count = {
+            .uniform_buffer = 4,
+            // .uniform_buffer_dynamic = 0,
+            // .combined_image_sampler = 0,
+            // .input_attachment = 0,
+        },
+        .max_descriptor_sets = 64,
+    });
+
+
 }
 
 s32 main() {
@@ -209,13 +240,11 @@ s32 main() {
     });
 
     Vulkan *vk = create_vulkan(app->mem.vulkan, platform, {
-        .max = {
-            .buffers       = 2,
-            .regions       = 32,
-            .render_passes = 2,
-            .shaders       = 16,
-            .pipelines     = 8,
-        },
+        .max_buffers       = 2,
+        .max_regions       = 32,
+        .max_render_passes = 2,
+        .max_shaders       = 16,
+        .max_pipelines     = 8,
     });
 
     // Initialization
@@ -224,6 +253,7 @@ s32 main() {
     create_render_passes(app, vk);
     create_framebuffers(app, vk);
     create_shaders(app, vk);
+    create_descriptor_sets(app, vk);
     create_pipelines(app, vk);
 
     create_test_data(app, vk);

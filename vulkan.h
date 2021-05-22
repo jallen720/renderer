@@ -9,14 +9,12 @@
 #include "vtk/device_features.h"
 #include "renderer/platform.h"
 
+#define COLOR_COMPONENT_RGBA \
+    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
+
 struct Instance {
     VkInstance handle;
     VkDebugUtilsMessengerEXT debug_messenger;
-};
-
-struct Surface {
-    VkSurfaceKHR handle;
-    VkSurfaceCapabilitiesKHR capabilities;
 };
 
 struct QueueFamilyIndexes {
@@ -110,28 +108,44 @@ struct Shader {
     VkShaderStageFlagBits stage;
 };
 
+struct DescriptorPoolInfo {
+    struct {
+        u32 uniform_buffer;
+        u32 uniform_buffer_dynamic;
+        u32 combined_image_sampler;
+        u32 input_attachment;
+    } descriptor_count;
+
+    u32 max_descriptor_sets;
+};
+
 struct PipelineInfo {
-    CTK_Array<Shader *> *shaders;
+    CTK_FixedArray<Shader *,   8> shaders;
+    CTK_FixedArray<VkViewport, 4> viewports;
+    CTK_FixedArray<VkRect2D,   4> scissors;
+    CTK_FixedArray<VkPipelineColorBlendAttachmentState, 4> color_blend_attachments;
+
+    CTK_Array<VkDescriptorSetLayout> *descriptor_set_layouts;
+    CTK_Array<VkPushConstantRange>   *push_constant_ranges;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly;
-    VkPipelineDepthStencilStateCreateInfo depth_stencil;
+    VkPipelineDepthStencilStateCreateInfo  depth_stencil;
     VkPipelineRasterizationStateCreateInfo rasterization;
-    VkPipelineMultisampleStateCreateInfo multisample;
-    VkPipelineColorBlendStateCreateInfo color_blend;
+    VkPipelineMultisampleStateCreateInfo   multisample;
+    VkPipelineColorBlendStateCreateInfo    color_blend;
 };
 
 struct Pipeline {
     VkPipeline handle;
+    VkPipelineLayout layout;
 };
 
 struct VulkanInfo {
-    struct {
-        u32 buffers;
-        u32 regions;
-        u32 render_passes;
-        u32 shaders;
-        u32 pipelines;
-    } max;
+    u32 max_buffers;
+    u32 max_regions;
+    u32 max_render_passes;
+    u32 max_shaders;
+    u32 max_pipelines;
 };
 
 struct Vulkan {
@@ -151,7 +165,7 @@ struct Vulkan {
 
     // State
     Instance instance;
-    Surface surface;
+    VkSurfaceKHR surface;
 
     struct {
         PhysicalDevice physical;
@@ -220,7 +234,7 @@ static void init_surface(Vulkan *vk, Platform *platform) {
     info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     info.hwnd = platform->window->handle;
     info.hinstance = platform->instance;
-    vtk_validate_result(vkCreateWin32SurfaceKHR(vk->instance.handle, &info, nullptr, &vk->surface.handle),
+    vtk_validate_result(vkCreateWin32SurfaceKHR(vk->instance.handle, &info, nullptr, &vk->surface),
                         "failed to get win32 surface");
 }
 
@@ -240,7 +254,7 @@ static QueueFamilyIndexes find_queue_family_indexes(Vulkan *vk, VkPhysicalDevice
             queue_family_indexes.graphics = queue_family_index;
 
         VkBool32 present_supported = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, vk->surface.handle, &present_supported);
+        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, vk->surface, &present_supported);
         if (present_supported == VK_TRUE)
             queue_family_indexes.present = queue_family_index;
     }
@@ -250,7 +264,8 @@ static QueueFamilyIndexes find_queue_family_indexes(Vulkan *vk, VkPhysicalDevice
 }
 
 static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<PhysicalDevice *> *physical_devices,
-                                                     CTK_Array<s32> *requested_features) {
+                                                     CTK_Array<s32> *requested_features)
+{
     ctk_push_frame(vk->mem.temp);
 
     CTK_Array<s32> *unsupported_features =
@@ -379,17 +394,22 @@ static void init_logical_device(Vulkan *vk, CTK_Array<s32> *requested_features) 
                      &vk->device.logical.queue.present);
 }
 
-static void update_surface_capabilities(Vulkan *vk) {
+static VkSurfaceCapabilitiesKHR get_surface_capabilities(Vulkan *vk) {
+    VkSurfaceCapabilitiesKHR capabilities = {};
     vtk_validate_result(
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-            vk->device.physical.handle,
-            vk->surface.handle,
-            &vk->surface.capabilities),
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk->device.physical.handle, vk->surface, &capabilities),
         "failed to get physical device surface capabilities");
+
+    return capabilities;
+}
+
+static VkExtent2D get_surface_extent(Vulkan *vk) {
+    return get_surface_capabilities(vk).currentExtent;
 }
 
 static void init_swapchain(Vulkan *vk) {
     ctk_push_frame(vk->mem.temp);
+    VkSurfaceCapabilitiesKHR surface_capabilities = get_surface_capabilities(vk);
 
     ////////////////////////////////////////////////////////////
     /// Configuration
@@ -401,14 +421,14 @@ static void init_swapchain(Vulkan *vk) {
             vk->mem.temp,
             vkGetPhysicalDeviceSurfaceFormatsKHR,
             vk->device.physical.handle,
-            vk->surface.handle);
+            vk->surface);
 
     auto surface_present_modes =
         vtk_load_vk_objects<VkPresentModeKHR>(
             vk->mem.temp,
             vkGetPhysicalDeviceSurfacePresentModesKHR,
             vk->device.physical.handle,
-            vk->surface.handle);
+            vk->surface);
 
     // Default to first surface format.
     VkSurfaceFormatKHR selected_format = surface_formats->data[0];
@@ -437,12 +457,12 @@ static void init_swapchain(Vulkan *vk) {
     }
 
     // Set image count to min image count + 1 or max image count (whichever is smaller).
-    u32 selected_image_count = vk->surface.capabilities.minImageCount + 1;
-    if (vk->surface.capabilities.maxImageCount > 0 && selected_image_count > vk->surface.capabilities.maxImageCount)
-        selected_image_count = vk->surface.capabilities.maxImageCount;
+    u32 selected_image_count = surface_capabilities.minImageCount + 1;
+    if (surface_capabilities.maxImageCount > 0 && selected_image_count > surface_capabilities.maxImageCount)
+        selected_image_count = surface_capabilities.maxImageCount;
 
     // Verify current extent has been set for surface.
-    if (vk->surface.capabilities.currentExtent.width == UINT32_MAX)
+    if (surface_capabilities.currentExtent.width == UINT32_MAX)
         CTK_FATAL("current extent not set for surface")
 
     ////////////////////////////////////////////////////////////
@@ -457,16 +477,16 @@ static void init_swapchain(Vulkan *vk) {
 
     VkSwapchainCreateInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    info.surface = vk->surface.handle;
+    info.surface = vk->surface;
     info.flags = 0;
     info.minImageCount = selected_image_count;
     info.imageFormat = selected_format.format;
     info.imageColorSpace = selected_format.colorSpace;
-    info.imageExtent = vk->surface.capabilities.currentExtent;
+    info.imageExtent = surface_capabilities.currentExtent;
     info.imageArrayLayers = 1; // Always 1 for standard images.
     info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                       VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    info.preTransform = vk->surface.capabilities.currentTransform;
+    info.preTransform = surface_capabilities.currentTransform;
     info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     info.presentMode = selected_present_mode;
     info.clipped = VK_TRUE;
@@ -486,7 +506,7 @@ static void init_swapchain(Vulkan *vk) {
 
     // Store surface state used to create swapchain for future reference.
     vk->swapchain.image_format = selected_format.format;
-    vk->swapchain.extent = vk->surface.capabilities.currentExtent;
+    vk->swapchain.extent = surface_capabilities.currentExtent;
 
     ////////////////////////////////////////////////////////////
     /// Image View Creation
@@ -541,11 +561,11 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     auto vk = ctk_alloc<Vulkan>(module_mem, 1);
     vk->mem.module = module_mem;
     vk->mem.temp = ctk_create_stack_allocator(module_mem, CTK_MEGABYTE);
-    vk->pool.buffer      = ctk_create_pool<Buffer>      (vk->mem.module, info.max.buffers);
-    vk->pool.region      = ctk_create_pool<Region>      (vk->mem.module, info.max.regions);
-    vk->pool.render_pass = ctk_create_pool<RenderPass>  (vk->mem.module, info.max.render_passes);
-    vk->pool.shader      = ctk_create_pool<Shader>      (vk->mem.module, info.max.shaders);
-    vk->pool.pipeline    = ctk_create_pool<Pipeline>    (vk->mem.module, info.max.pipelines);
+    vk->pool.buffer      = ctk_create_pool<Buffer>      (vk->mem.module, info.max_buffers);
+    vk->pool.region      = ctk_create_pool<Region>      (vk->mem.module, info.max_regions);
+    vk->pool.render_pass = ctk_create_pool<RenderPass>  (vk->mem.module, info.max_render_passes);
+    vk->pool.shader      = ctk_create_pool<Shader>      (vk->mem.module, info.max_shaders);
+    vk->pool.pipeline    = ctk_create_pool<Pipeline>    (vk->mem.module, info.max_pipelines);
 
     ctk_push_frame(vk->mem.temp);
 
@@ -559,9 +579,6 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     load_physical_device(vk, requested_features);
     init_logical_device(vk, requested_features);
 
-    // Update surface capabilities for loaded physical device.
-    update_surface_capabilities(vk);
-
     init_swapchain(vk);
     init_command_pool(vk);
 
@@ -569,8 +586,11 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     return vk;
 }
 
-static VkDeviceMemory allocate_device_memory(Vulkan *vk, VkMemoryRequirements mem_reqs,
-                                             VkMemoryPropertyFlags mem_property_flags) {
+////////////////////////////////////////////////////////////
+/// Memory
+////////////////////////////////////////////////////////////
+static VkDeviceMemory
+allocate_device_memory(Vulkan *vk, VkMemoryRequirements mem_reqs, VkMemoryPropertyFlags mem_property_flags) {
     // Allocate memory
     VkMemoryAllocateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -639,6 +659,9 @@ static void write_to_device_region(Vulkan *vk, Region *region, Region *staging_r
 
 }
 
+////////////////////////////////////////////////////////////
+/// Resource Creation
+////////////////////////////////////////////////////////////
 static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
     ctk_push_frame(vk->mem.temp);
 
@@ -724,172 +747,176 @@ static Shader *create_shader(Vulkan *vk, cstr spirv_path, VkShaderStageFlagBits 
     return shader;
 }
 
-////////////////////////////////////////////////////////////
-/// Pipeline
-////////////////////////////////////////////////////////////
+static VkDescriptorPool create_descriptor_pool(Vulkan *vk, DescriptorPoolInfo info) {
+    CTK_FixedArray<VkDescriptorPoolSize, 4> pool_sizes = {};
+
+    if (info.descriptor_count.uniform_buffer) {
+        ctk_push(&pool_sizes, {
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = info.descriptor_count.uniform_buffer,
+        });
+    }
+
+    if (info.descriptor_count.uniform_buffer_dynamic) {
+        ctk_push(&pool_sizes, {
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            .descriptorCount = info.descriptor_count.uniform_buffer_dynamic,
+        });
+    }
+
+    if (info.descriptor_count.combined_image_sampler) {
+        ctk_push(&pool_sizes, {
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = info.descriptor_count.combined_image_sampler,
+        });
+    }
+
+    if (info.descriptor_count.input_attachment) {
+        ctk_push(&pool_sizes, {
+            .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+            .descriptorCount = info.descriptor_count.input_attachment,
+        });
+    }
+
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = 0;
+    pool_info.maxSets = info.max_descriptor_sets;
+    pool_info.poolSizeCount = pool_sizes.count;
+    pool_info.pPoolSizes = pool_sizes.data;
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    vtk_validate_result(vkCreateDescriptorPool(vk->device.logical.handle, &pool_info, NULL, &pool),
+                        "failed to create descriptor pool");
+
+    return pool;
+}
+
+static VkDescriptorSetLayout
+create_descriptor_set_layout(VkDevice logical_device, VkDescriptorSetLayoutBinding *bindings, u32 binding_count) {
+    VkDescriptorSetLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = binding_count;
+    info.pBindings = bindings;
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    vtk_validate_result(vkCreateDescriptorSetLayout(logical_device, &info, NULL, &layout),
+                        "error creating descriptor set layout");
+
+    return layout;
+}
+
+static VkDescriptorSetLayout
+create_descriptor_set_layout(VkDevice logical_device, CTK_Array<VkDescriptorSetLayoutBinding> *bindings) {
+    return create_descriptor_set_layout(logical_device, bindings->data, bindings->count);
+}
+
 static PipelineInfo const DEFAULT_PIPELINE_INFO = {
     .input_assembly = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .primitiveRestartEnable = VK_FALSE,
     },
     .depth_stencil = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = VK_FALSE,
-        .depthWriteEnable = VK_FALSE,
-        .depthCompareOp = VK_COMPARE_OP_LESS,
+        .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable       = VK_FALSE,
+        .depthWriteEnable      = VK_FALSE,
+        .depthCompareOp        = VK_COMPARE_OP_LESS,
         .depthBoundsTestEnable = VK_FALSE,
-        .stencilTestEnable = VK_FALSE,
+        .stencilTestEnable     = VK_FALSE,
         .front = {
-            .failOp = VK_STENCIL_OP_KEEP,
-            .passOp = VK_STENCIL_OP_KEEP,
+            .failOp      = VK_STENCIL_OP_KEEP,
+            .passOp      = VK_STENCIL_OP_KEEP,
             .depthFailOp = VK_STENCIL_OP_KEEP,
-            .compareOp = VK_COMPARE_OP_NEVER,
+            .compareOp   = VK_COMPARE_OP_NEVER,
             .compareMask = 0xFF,
-            .writeMask = 0xFF,
-            .reference = 1,
+            .writeMask   = 0xFF,
+            .reference   = 1,
         },
         .back = {
-            .failOp = VK_STENCIL_OP_KEEP,
-            .passOp = VK_STENCIL_OP_KEEP,
+            .failOp      = VK_STENCIL_OP_KEEP,
+            .passOp      = VK_STENCIL_OP_KEEP,
             .depthFailOp = VK_STENCIL_OP_KEEP,
-            .compareOp = VK_COMPARE_OP_NEVER,
+            .compareOp   = VK_COMPARE_OP_NEVER,
             .compareMask = 0xFF,
-            .writeMask = 0xFF,
-            .reference = 1,
+            .writeMask   = 0xFF,
+            .reference   = 1,
         },
         .minDepthBounds = 0.0f,
         .maxDepthBounds = 1.0f,
     },
     .rasterization = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .depthClampEnable = VK_FALSE, // Don't clamp fragments within depth range.
+        .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .depthClampEnable        = VK_FALSE, // Don't clamp fragments within depth range.
         .rasterizerDiscardEnable = VK_FALSE,
-        .polygonMode = VK_POLYGON_MODE_FILL, // Only available mode on AMD gpus?
-        .cullMode = VK_CULL_MODE_BACK_BIT,
-        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-        .depthBiasEnable = VK_FALSE,
+        .polygonMode             = VK_POLYGON_MODE_FILL, // Only available mode on AMD gpus?
+        .cullMode                = VK_CULL_MODE_BACK_BIT,
+        .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .depthBiasEnable         = VK_FALSE,
         .depthBiasConstantFactor = 0.0f,
-        .depthBiasClamp = 0.0f,
-        .depthBiasSlopeFactor = 0.0f,
-        .lineWidth = 1.0f,
+        .depthBiasClamp          = 0.0f,
+        .depthBiasSlopeFactor    = 0.0f,
+        .lineWidth               = 1.0f,
     },
     .multisample = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-        .sampleShadingEnable = VK_FALSE,
-        .minSampleShading = 1.0f,
-        .pSampleMask = NULL,
+        .sType                 = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples  = VK_SAMPLE_COUNT_1_BIT,
+        .sampleShadingEnable   = VK_FALSE,
+        .minSampleShading      = 1.0f,
+        .pSampleMask           = NULL,
         .alphaToCoverageEnable = VK_FALSE,
-        .alphaToOneEnable = VK_FALSE,
+        .alphaToOneEnable      = VK_FALSE,
     },
     .color_blend = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .logicOpEnable = VK_FALSE,
-        .logicOp = VK_LOGIC_OP_COPY,
+        .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOpEnable   = VK_FALSE,
+        .logicOp         = VK_LOGIC_OP_COPY,
         .attachmentCount = 0,
-        .pAttachments = NULL,
-        .blendConstants = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .pAttachments    = NULL,
+        .blendConstants  = { 1.0f, 1.0f, 1.0f, 1.0f },
     },
 };
 
-// static PipelineInfo vtk_default_pipeline_info() {
-//     PipelineInfo info = {};
-//     info.input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-//     info.input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-//     info.input_assembly.primitiveRestartEnable = VK_FALSE;
-
-//     info.depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-//     // Depth
-//     info.depth_stencil.depthTestEnable = VK_FALSE;
-//     info.depth_stencil.depthWriteEnable = VK_FALSE;
-//     info.depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
-//     info.depth_stencil.depthBoundsTestEnable = VK_FALSE;
-//     info.depth_stencil.minDepthBounds = 0.0f;
-//     info.depth_stencil.maxDepthBounds = 1.0f;
-//     // Stencil
-//     info.depth_stencil.stencilTestEnable = VK_FALSE;
-//     info.depth_stencil.front.compareOp = VK_COMPARE_OP_NEVER;
-//     info.depth_stencil.front.passOp = VK_STENCIL_OP_KEEP;
-//     info.depth_stencil.front.failOp = VK_STENCIL_OP_KEEP;
-//     info.depth_stencil.front.depthFailOp = VK_STENCIL_OP_KEEP;
-//     info.depth_stencil.front.compareMask = 0xFF;
-//     info.depth_stencil.front.writeMask = 0xFF;
-//     info.depth_stencil.front.reference = 1;
-//     info.depth_stencil.back = info.depth_stencil.front;
-
-//     info.rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-//     info.rasterization.depthClampEnable = VK_FALSE; // Don't clamp fragments within depth range.
-//     info.rasterization.rasterizerDiscardEnable = VK_FALSE;
-//     info.rasterization.polygonMode = VK_POLYGON_MODE_FILL; // Only available mode on AMD gpus?
-//     info.rasterization.cullMode = VK_CULL_MODE_BACK_BIT;
-//     info.rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-//     info.rasterization.depthBiasEnable = VK_FALSE;
-//     info.rasterization.depthBiasConstantFactor = 0.0f;
-//     info.rasterization.depthBiasClamp = 0.0f;
-//     info.rasterization.depthBiasSlopeFactor = 0.0f;
-//     info.rasterization.lineWidth = 1.0f;
-
-//     info.multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-//     info.multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-//     info.multisample.sampleShadingEnable = VK_FALSE;
-//     info.multisample.minSampleShading = 1.0f;
-//     info.multisample.pSampleMask = NULL;
-//     info.multisample.alphaToCoverageEnable = VK_FALSE;
-//     info.multisample.alphaToOneEnable = VK_FALSE;
-
-//     info.color_blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-//     info.color_blend.logicOpEnable = VK_FALSE;
-//     info.color_blend.logicOp = VK_LOGIC_OP_COPY;
-//     info.color_blend.attachmentCount = 0;
-//     info.color_blend.pAttachments = NULL;
-//     info.color_blend.blendConstants[0] = 1.0f;
-//     info.color_blend.blendConstants[1] = 1.0f;
-//     info.color_blend.blendConstants[2] = 1.0f;
-//     info.color_blend.blendConstants[3] = 1.0f;
-//     return info;
-// }
-
-// static VkPipelineColorBlendAttachmentState vtk_default_color_blend_attachment_state() {
-//     VkPipelineColorBlendAttachmentState state = {};
-//     state.blendEnable = VK_FALSE;
-//     state.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-//     state.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-//     state.colorBlendOp = VK_BLEND_OP_ADD;
-//     state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-//     state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;;
-
-//     state.alphaBlendOp = VK_BLEND_OP_ADD//     state.colorWriteMask = COLOR_COMPONENT_RGBA;
-//     return state;
-// }
+static VkPipelineColorBlendAttachmentState const DEFAULT_COLOR_BLEND_ATTACHMENT = {
+    .blendEnable         = VK_FALSE,
+    .srcColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .colorBlendOp        = VK_BLEND_OP_ADD,
+    .srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    .alphaBlendOp        = VK_BLEND_OP_ADD,
+    .colorWriteMask      = COLOR_COMPONENT_RGBA,
+};
 
 static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpass, PipelineInfo *info) {
     ctk_push_frame(vk->mem.temp);
     Pipeline *pipeline = ctk_alloc(vk->pool.pipeline);
 
     // Shader Stages
-    auto shader_stages = ctk_create_array<VkPipelineShaderStageCreateInfo>(vk->mem.temp, info->shaders->count);
-    for (u32 i = 0; i < info->shaders->count; ++i) {
-        Shader *shader = info->shaders->data[i];
+    auto shader_stages = ctk_create_array<VkPipelineShaderStageCreateInfo>(vk->mem.temp, info->shaders.count);
+    for (u32 i = 0; i < info->shaders.count; ++i) {
+        Shader *shader = info->shaders.data[i];
         VkPipelineShaderStageCreateInfo *shader_stage_info = ctk_push(shader_stages);
-        shader_stage_info->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stage_info->flags = 0;
-        shader_stage_info->stage = shader->stage;
+        shader_stage_info->sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shader_stage_info->flags  = 0;
+        shader_stage_info->stage  = shader->stage;
         shader_stage_info->module = shader->handle;
-        shader_stage_info->pName = "main";
+        shader_stage_info->pName  = "main";
         shader_stage_info->pSpecializationInfo = NULL;
     }
 
-    // VkPipelineLayoutCreateInfo layout_ci = {};
-    // layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    // layout_ci.setLayoutCount = info->descriptor_set_layouts.count;
-    // layout_ci.pSetLayouts = info->descriptor_set_layouts.data;
-    // layout_ci.pushConstantRangeCount = info->push_constant_ranges.count;
-    // layout_ci.pPushConstantRanges = info->push_constant_ranges.data;
-    // vtk_validate_result(vkCreatePipelineLayout(vk->device.logical.handle, &layout_ci, NULL, &pipeline.layout),
-    //                     "failed to create graphics pipeline layout");
+    VkPipelineLayoutCreateInfo layout_ci = {};
+    layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    if (info->descriptor_set_layouts) {
+        layout_ci.setLayoutCount = info->descriptor_set_layouts->count;
+        layout_ci.pSetLayouts    = info->descriptor_set_layouts->data;
+    }
+    if (info->push_constant_ranges) {
+        layout_ci.pushConstantRangeCount = info->push_constant_ranges->count;
+        layout_ci.pPushConstantRanges    = info->push_constant_ranges->data;
+    }
+    vtk_validate_result(vkCreatePipelineLayout(vk->device.logical.handle, &layout_ci, NULL, &pipeline->layout),
+                        "failed to create graphics pipeline layout");
 
-    // // Vertex Attribute Descriptions
+    // Vertex Attribute Descriptions
     // auto vert_attrib_descs =
     //     ctk_create_array<VkVertexInputAttributeDescription>(vk->mem.temp, info->vertex_inputs->count);
 
@@ -903,12 +930,29 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     //     });
     // }
 
-    // VkPipelineVertexInputStateCreateInfo vert_input_state = {};
-    // vert_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    // vert_input_state.vertexBindingDescriptionCount = info->vertex_input_binding_descriptions.count;
-    // vert_input_state.pVertexBindingDescriptions = info->vertex_input_binding_descriptions.data;
-    // vert_input_state.vertexAttributeDescriptionCount = vert_attrib_descs->count;
-    // vert_input_state.pVertexAttributeDescriptions = vert_attrib_descs->data;
+    VkVertexInputBindingDescription vert_input_binding_descs[] = {
+        {
+            .binding   = 0,
+            .stride    = 12,
+            .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        },
+    };
+
+    VkVertexInputAttributeDescription vert_attrib_descs[] = {
+        {
+            .location = 0,
+            .binding  = 0,
+            .format   = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset   = 0,
+        },
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertex_input = {};
+    vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input.vertexBindingDescriptionCount   = CTK_ARRAY_SIZE(vert_input_binding_descs);
+    vertex_input.pVertexBindingDescriptions      = vert_input_binding_descs;
+    vertex_input.vertexAttributeDescriptionCount = CTK_ARRAY_SIZE(vert_attrib_descs);
+    vertex_input.pVertexAttributeDescriptions    = vert_attrib_descs;
 
     // // Viewport State
     // VkPipelineViewportStateCreateInfo viewport_state = {};
@@ -941,35 +985,43 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     //     viewport_state.pScissors = info->scissors.data;
     // }
 
-    // info->color_blend_state.attachmentCount = info->color_blend_attachment_states.count;
-    // info->color_blend_state.pAttachments = info->color_blend_attachment_states.data;
+    VkPipelineViewportStateCreateInfo viewport = {};
+    viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport.viewportCount = info->viewports.count;
+    viewport.pViewports    = info->viewports.data;
+    viewport.scissorCount  = info->scissors.count;
+    viewport.pScissors     = info->scissors.data;
 
     // VkPipelineDynamicStateCreateInfo dynamic_state = {};
     // dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     // dynamic_state.dynamicStateCount = info->dynamic_states.count;
     // dynamic_state.pDynamicStates = info->dynamic_states.data;
 
-    // VkPipelineCreateInfo create_info = {};
-    // create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    // create_info.stageCount = shader_stages->count;
-    // create_info.pStages = shader_stages->data;
-    // create_info.pVertexInputState = &vert_input_state;
-    // create_info.pInputAssemblyState = &info->input_assembly_state;
-    // create_info.pTessellationState = NULL;
-    // create_info.pViewportState = &viewport_state;
-    // create_info.pRasterizationState = &info->rasterization_state;
-    // create_info.pMultisampleState = &info->multisample_state;
-    // create_info.pDepthStencilState = &info->depth_stencil_state;
-    // create_info.pColorBlendState = &info->color_blend_state;
-    // create_info.pDynamicState = &dynamic_state;
-    // create_info.layout = pipeline.layout;
-    // create_info.renderPass = render_pass->handle;
-    // create_info.subpass = subpass;
-    // create_info.basePipelineHandle = VK_NULL_HANDLE;
-    // create_info.basePipelineIndex = -1;
-    // vtk_validate_result(
-    //     vkCreatePipelines(vk->device.logical.handle, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline.handle),
-    //     "failed to create graphics pipeline");
+    // Reference attachment array in color_blend struct.
+    info->color_blend.attachmentCount = info->color_blend_attachments.count;
+    info->color_blend.pAttachments    = info->color_blend_attachments.data;
+
+    VkGraphicsPipelineCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    create_info.stageCount          = shader_stages->count;
+    create_info.pStages             = shader_stages->data;
+    create_info.pVertexInputState   = &vertex_input;
+    create_info.pInputAssemblyState = &info->input_assembly;
+    create_info.pTessellationState  = NULL;
+    create_info.pViewportState      = &viewport;
+    create_info.pRasterizationState = &info->rasterization;
+    create_info.pMultisampleState   = &info->multisample;
+    create_info.pDepthStencilState  = &info->depth_stencil;
+    create_info.pColorBlendState    = &info->color_blend;
+    create_info.pDynamicState       = NULL;//&dynamic;
+    create_info.layout              = pipeline->layout;
+    create_info.renderPass          = render_pass->handle;
+    create_info.subpass             = subpass;
+    create_info.basePipelineHandle  = VK_NULL_HANDLE;
+    create_info.basePipelineIndex   = -1;
+    vtk_validate_result(
+        vkCreateGraphicsPipelines(vk->device.logical.handle, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline->handle),
+        "failed to create graphics pipeline");
 
     // Cleanup
     ctk_pop_frame(vk->mem.temp);
