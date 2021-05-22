@@ -2,11 +2,6 @@
 #include "renderer/vulkan.h"
 #include "ctk/math.h"
 
-struct ShaderGroup {
-    Shader *vert;
-    Shader *frag;
-};
-
 struct App {
     struct {
         CTK_Allocator *fixed;
@@ -15,6 +10,15 @@ struct App {
         CTK_Allocator *vulkan;
     } mem;
 
+    CTK_Array<CTK_Vec3<f32>> *vertexes;
+};
+
+struct ShaderGroup {
+    Shader *vert;
+    Shader *frag;
+};
+
+struct Graphics {
     struct {
         Buffer *host;
         Buffer *device;
@@ -25,13 +29,9 @@ struct App {
         Region *mesh;
     } region;
 
-    struct {
-        RenderPass *main;
-    } render_pass;
-
-    struct {
-        CTK_Array<VkFramebuffer> *swapchain;
-    } framebuffer;
+    RenderPass *main_render_pass;
+    CTK_Array<VkFramebuffer> *swapchain_framebufs;
+    CTK_Array<VkCommandBuffer> *render_cmd_bufs;
 
     struct {
         ShaderGroup triangle;
@@ -49,10 +49,9 @@ struct App {
         Pipeline *direct;
     } pipeline;
 
-    CTK_Array<CTK_Vec3<f32>> *vertexes;
 };
 
-static void create_buffers(App *app, Vulkan *vk) {
+static void create_buffers(Graphics *gfx, Vulkan *vk) {
     {
         BufferInfo info = {};
         info.size = 256 * CTK_MEGABYTE;
@@ -61,7 +60,7 @@ static void create_buffers(App *app, Vulkan *vk) {
                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         info.mem_property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        app->buffer.host = create_buffer(vk, &info);
+        gfx->buffer.host = create_buffer(vk, &info);
     }
     {
         BufferInfo info = {};
@@ -72,22 +71,13 @@ static void create_buffers(App *app, Vulkan *vk) {
                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                            VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         info.mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        app->buffer.device = create_buffer(vk, &info);
+        gfx->buffer.device = create_buffer(vk, &info);
     }
 }
 
-static void allocate_regions(App *app, Vulkan *vk) {
-    app->region.staging = allocate_region(vk, app->buffer.host, 64 * CTK_MEGABYTE);
-    app->region.mesh = allocate_region(vk, app->buffer.host, 64, 64);
-}
-
-static void create_test_data(App *app, Vulkan *vk) {
-    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->mem.fixed, 64);
-    ctk_push(app->vertexes, { -0.4f, -0.4f, 0 });
-    ctk_push(app->vertexes, {  0,     0.4f, 0 });
-    ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
-
-    write_to_host_region(vk, app->region.mesh, app->vertexes->data, app->vertexes->count);
+static void allocate_regions(Graphics *gfx, Vulkan *vk) {
+    gfx->region.staging = allocate_region(vk, gfx->buffer.host, 64 * CTK_MEGABYTE);
+    gfx->region.mesh = allocate_region(vk, gfx->buffer.host, 64, 64);
 }
 
 static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info) {
@@ -102,7 +92,7 @@ static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info)
     return attachment_index;
 }
 
-static void create_render_passes(App *app, Vulkan *vk) {
+static void create_render_passes(Graphics *gfx, App *app, Vulkan *vk) {
     {
         ctk_push_frame(app->mem.temp);
 
@@ -141,15 +131,15 @@ static void create_render_passes(App *app, Vulkan *vk) {
             .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
 
-        app->render_pass.main = create_render_pass(vk, &info);
+        gfx->main_render_pass = create_render_pass(vk, &info);
 
         ctk_pop_frame(app->mem.temp);
     }
 }
 
-static void create_framebuffers(App *app, Vulkan *vk) {
+static void create_framebuffers(Graphics *gfx, App *app, Vulkan *vk) {
     {
-        app->framebuffer.swapchain = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+        gfx->swapchain_framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
 
         // Create framebuffer for each swapchain image.
         for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
@@ -163,16 +153,16 @@ static void create_framebuffers(App *app, Vulkan *vk) {
 
             ctk_push(info.attachments, vk->swapchain.image_views[i]);
 
-            ctk_push(app->framebuffer.swapchain,
-                create_framebuffer(vk->device.logical.handle, app->render_pass.main->handle, &info));
+            ctk_push(gfx->swapchain_framebufs,
+                create_framebuffer(vk->device.logical.handle, gfx->main_render_pass->handle, &info));
 
             ctk_pop_frame(app->mem.temp);
         }
     }
 }
 
-static void create_shaders(App *app, Vulkan *vk) {
-    app->shader = {
+static void create_shaders(Graphics *gfx, Vulkan *vk) {
+    gfx->shader = {
         .triangle = {
             .vert = create_shader(vk, "data/shaders/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
             .frag = create_shader(vk, "data/shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -180,14 +170,28 @@ static void create_shaders(App *app, Vulkan *vk) {
     };
 }
 
-static void create_pipelines(App *app, Vulkan *vk) {
+static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
+    gfx->descriptor.pool = create_descriptor_pool(vk, {
+        .descriptor_count = {
+            .uniform_buffer = 4,
+            // .uniform_buffer_dynamic = 0,
+            // .combined_image_sampler = 0,
+            // .input_attachment = 0,
+        },
+        .max_descriptor_sets = 64,
+    });
+
+
+}
+
+static void create_pipelines(Graphics *gfx, App *app, Vulkan *vk) {
     {
-        ctk_push_frame(vk->mem.temp);
+        ctk_push_frame(app->mem.temp);
 
         VkExtent2D surface_extent = get_surface_extent(vk);
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
-        ctk_push(&info.shaders, app->shader.triangle.vert);
+        ctk_push(&info.shaders, gfx->shader.triangle.vert);
         ctk_push(&info.viewports, {
             .x        = 0,
             .y        = 0,
@@ -199,24 +203,31 @@ static void create_pipelines(App *app, Vulkan *vk) {
         ctk_push(&info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
         ctk_push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
-        app->pipeline.direct = create_pipeline(vk, app->render_pass.main, 0, &info);
+        gfx->pipeline.direct = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
-        ctk_pop_frame(vk->mem.temp);
+        ctk_pop_frame(app->mem.temp);
     }
 }
 
-static void create_descriptor_sets(App *app, Vulkan *vk) {
-    app->descriptor.pool = create_descriptor_pool(vk, {
-        .descriptor_count = {
-            .uniform_buffer = 4,
-            // .uniform_buffer_dynamic = 0,
-            // .combined_image_sampler = 0,
-            // .input_attachment = 0,
-        },
-        .max_descriptor_sets = 64,
-    });
+static Graphics *create_graphics(App *app, Vulkan *vk) {
+    Graphics *gfx = ctk_alloc<Graphics>(app->mem.fixed, 1);
+    create_buffers(gfx, vk);
+    allocate_regions(gfx, vk);
+    create_render_passes(gfx, app, vk);
+    create_framebuffers(gfx, app, vk);
+    create_shaders(gfx, vk);
+    create_descriptor_sets(gfx, vk);
+    create_pipelines(gfx, app, vk);
+    return gfx;
+}
 
+static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
+    app->vertexes = ctk_create_array<CTK_Vec3<f32>>(app->mem.fixed, 64);
+    ctk_push(app->vertexes, { -0.4f, -0.4f, 0 });
+    ctk_push(app->vertexes, {  0,     0.4f, 0 });
+    ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
 
+    write_to_host_region(vk, gfx->region.mesh, app->vertexes->data, app->vertexes->count);
 }
 
 s32 main() {
@@ -247,16 +258,10 @@ s32 main() {
         .max_pipelines     = 8,
     });
 
-    // Initialization
-    create_buffers(app, vk);
-    allocate_regions(app, vk);
-    create_render_passes(app, vk);
-    create_framebuffers(app, vk);
-    create_shaders(app, vk);
-    create_descriptor_sets(app, vk);
-    create_pipelines(app, vk);
+    Graphics *gfx = create_graphics(app, vk);
 
-    create_test_data(app, vk);
+    // Test
+    create_test_data(app, gfx, vk);
 
     // Main Loop
     while (platform->window->open) {
