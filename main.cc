@@ -21,7 +21,7 @@ struct ShaderGroup {
 struct Frame {
     VkSemaphore img_aquired;
     VkSemaphore render_finished;
-    VkFence in_flight;
+    VkFence     in_flight;
 };
 
 struct Graphics {
@@ -59,7 +59,7 @@ struct Graphics {
     } swap_state;
 
     struct {
-        u32 current_frame;
+        u32 current_frame_idx;
         CTK_Array<Frame> *frames;
     } sync;
 };
@@ -213,9 +213,7 @@ static void create_framebufs(Graphics *gfx, App *app, Vulkan *vk) {
         //     };
 
         //     ctk_push(info.attachments, vk->swapchain.image_views[i]);
-
-        //     ctk_push(gfx->swap_state.framebufs,
-        //         create_framebuf(vk->device.logical.handle, gfx->main_render_pass->handle, &info));
+        //     ctk_push(gfx->swap_state.framebufs, create_framebuf(vk->device, gfx->main_render_pass->handle, &info));
 
         //     ctk_pop_frame(app->mem.temp);
         // }
@@ -228,6 +226,20 @@ static void create_cmd_bufs(Graphics *gfx, App *app, Vulkan *vk) {
     // gfx->frame_state.render_cmd_bufs = render_cmd_bufs;
 }
 
+static void create_frames(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
+    gfx->sync.frames = ctk_create_array<Frame>(app->mem.fixed, frame_count);
+
+    for (u32 i = 0; i < frame_count; ++i) {
+        ctk_push(gfx->sync.frames, {
+            .img_aquired     = create_semaphore(vk),
+            .render_finished = create_semaphore(vk),
+            .in_flight       = create_fence(vk),
+        });
+    }
+
+    gfx->sync.current_frame_idx = CTK_U32_MAX;
+}
+
 static Graphics *create_graphics(App *app, Vulkan *vk) {
     Graphics *gfx = ctk_alloc<Graphics>(app->mem.fixed, 1);
     create_buffers(gfx, vk);
@@ -237,9 +249,9 @@ static Graphics *create_graphics(App *app, Vulkan *vk) {
     create_descriptor_sets(gfx, vk);
     create_pipelines(gfx, app, vk);
 
-    // Frame State
     create_framebufs(gfx, app, vk);
     create_cmd_bufs(gfx, app, vk);
+    create_frames(gfx, app, vk, 1);
 
     return gfx;
 }
@@ -253,10 +265,37 @@ static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
     write_to_host_region(vk, gfx->region.mesh, app->vertexes->data, app->vertexes->count);
 }
 
+static Frame *get_next_frame(Graphics *gfx) {
+    if (++gfx->sync.current_frame_idx >= gfx->sync.frames->size)
+        gfx->sync.current_frame_idx = 0;
+
+    return gfx->sync.frames->data + gfx->sync.current_frame_idx;
+}
+
 static void render(Graphics *gfx, Vulkan *vk) {
-    // u32 swapchain_img_idx = next_swapchain_img_idx(vk, gfx->frame_state);
+    Frame *frame = get_next_frame(gfx);
+    u32 swapchain_img_idx = get_next_swapchain_img_idx(vk, frame->img_aquired, VK_NULL_HANDLE);
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.pNext = NULL;
+    submit_info.waitSemaphoreCount   = 1;
+    submit_info.pWaitSemaphores      = &frame->img_aquired;
+    submit_info.pWaitDstStageMask    = &wait_stage;
+    submit_info.commandBufferCount   = 0;
+    submit_info.pCommandBuffers      = NULL;
+    submit_info.signalSemaphoreCount = 0;
+    submit_info.pSignalSemaphores    = NULL;
 
+    vtk_validate_result(vkQueueSubmit(vk->queue.graphics, 1, &submit_info, frame->in_flight),
+                        "vkQueueSubmit failed");
+
+    vtk_validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX),
+                        "vkWaitForFences failed");
+
+    vtk_validate_result(vkResetFences(vk->device, 1, &frame->in_flight),
+                        "vkResetFences failed");
 }
 
 s32 main() {
@@ -291,6 +330,9 @@ s32 main() {
 
     // Test
     create_test_data(app, gfx, vk);
+
+    // render(gfx, vk);
+    // render(gfx, vk);
 
     // Main Loop
     while (platform->window->open) {
