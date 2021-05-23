@@ -18,6 +18,12 @@ struct ShaderGroup {
     Shader *frag;
 };
 
+struct Frame {
+    VkSemaphore img_aquired;
+    VkSemaphore render_finished;
+    VkFence in_flight;
+};
+
 struct Graphics {
     struct {
         Buffer *host;
@@ -48,20 +54,14 @@ struct Graphics {
     } pipeline;
 
     struct {
-        u32 idx;
-        CTK_Array<VkFramebuffer>   *framebufs;
+        CTK_Array<VkFramebuffer> *framebufs;
         CTK_Array<VkCommandBuffer> *render_cmd_bufs;
-        CTK_Array<VkSemaphore>     *img_sema4s;
+    } swap_state;
 
-        struct {
-            CTK_Array<VkSemaphore> *img_aquired;
-            // CTK_Array<VkSemaphore> *render_finished;
-        } sema4s;
-
-        // struct {
-        //     CTK_Array<VkFence> *in_flight;
-        // } fences;
-    } frame_state;
+    struct {
+        u32 current_frame;
+        CTK_Array<Frame> *frames;
+    } sync;
 };
 
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
@@ -200,32 +200,32 @@ static void create_pipelines(Graphics *gfx, App *app, Vulkan *vk) {
 
 static void create_framebufs(Graphics *gfx, App *app, Vulkan *vk) {
     {
-        gfx->frame_state.framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+        // gfx->frame_state.framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
 
-        // Create framebuffer for each swapchain image.
-        for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
-            ctk_push_frame(app->mem.temp);
+        // // Create framebuffer for each swapchain image.
+        // for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
+        //     ctk_push_frame(app->mem.temp);
 
-            FramebufferInfo info = {
-                .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
-                .extent      = get_surface_extent(vk),
-                .layers      = 1,
-            };
+        //     FramebufferInfo info = {
+        //         .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
+        //         .extent      = get_surface_extent(vk),
+        //         .layers      = 1,
+        //     };
 
-            ctk_push(info.attachments, vk->swapchain.image_views[i]);
+        //     ctk_push(info.attachments, vk->swapchain.image_views[i]);
 
-            ctk_push(gfx->swap_state.framebufs,
-                create_framebuf(vk->device.logical.handle, gfx->main_render_pass->handle, &info));
+        //     ctk_push(gfx->swap_state.framebufs,
+        //         create_framebuf(vk->device.logical.handle, gfx->main_render_pass->handle, &info));
 
-            ctk_pop_frame(app->mem.temp);
-        }
+        //     ctk_pop_frame(app->mem.temp);
+        // }
     }
 }
 
 static void create_cmd_bufs(Graphics *gfx, App *app, Vulkan *vk) {
-    auto render_cmd_bufs = ctk_create_array_full<VkCommandBuffer>(app->mem.fixed, vk->swapchain.image_count);
-    alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, render_cmd_bufs->count, render_cmd_bufs->data);
-    gfx->frame_state.render_cmd_bufs = render_cmd_bufs;
+    // auto render_cmd_bufs = ctk_create_array_full<VkCommandBuffer>(app->mem.fixed, vk->swapchain.image_count);
+    // alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, render_cmd_bufs->count, render_cmd_bufs->data);
+    // gfx->frame_state.render_cmd_bufs = render_cmd_bufs;
 }
 
 static Graphics *create_graphics(App *app, Vulkan *vk) {
@@ -254,7 +254,7 @@ static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
 }
 
 static void render(Graphics *gfx, Vulkan *vk) {
-    u32 swapchain_img_idx = next_swapchain_img_idx(vk, gfx->frame_state);
+    // u32 swapchain_img_idx = next_swapchain_img_idx(vk, gfx->frame_state);
 
 
 }
