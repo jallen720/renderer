@@ -173,7 +173,7 @@ struct Vulkan {
     } device;
 
     Swapchain swapchain;
-    VkCommandPool command_pool;
+    VkCommandPool cmd_pool;
 };
 
 static void init_instance(Vulkan *vk) {
@@ -546,18 +546,18 @@ static void init_swapchain(Vulkan *vk) {
     ctk_pop_frame(vk->mem.temp);
 }
 
-static void init_command_pool(Vulkan *vk) {
+static void init_cmd_pool(Vulkan *vk) {
     VkCommandPoolCreateInfo command_pool_info = {};
     command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     command_pool_info.queueFamilyIndex = vk->device.physical.queue_family_indexes.graphics;
     vtk_validate_result(
-        vkCreateCommandPool(vk->device.logical.handle, &command_pool_info, NULL, &vk->command_pool),
+        vkCreateCommandPool(vk->device.logical.handle, &command_pool_info, NULL, &vk->cmd_pool),
         "failed to create command pool");
 }
 
 static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, VulkanInfo info) {
-    // Allocate memory for vk module.
+    // Allocate memory for vk module.s
     auto vk = ctk_alloc<Vulkan>(module_mem, 1);
     vk->mem.module = module_mem;
     vk->mem.temp = ctk_create_stack_allocator(module_mem, CTK_MEGABYTE);
@@ -580,7 +580,7 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     init_logical_device(vk, requested_features);
 
     init_swapchain(vk);
-    init_command_pool(vk);
+    init_cmd_pool(vk);
 
     ctk_pop_frame(vk->mem.temp);
     return vk;
@@ -726,6 +726,16 @@ static VkFramebuffer create_framebuffer(VkDevice logical_device, VkRenderPass rp
     VkFramebuffer fb = VK_NULL_HANDLE;
     vtk_validate_result(vkCreateFramebuffer(logical_device, &create_info, NULL, &fb), "failed to create framebuffer");
     return fb;
+}
+
+static void alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count, VkCommandBuffer *cmd_bufs) {
+    VkCommandBufferAllocateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    info.commandPool        = vk->cmd_pool;
+    info.level              = level;
+    info.commandBufferCount = count;
+    vtk_validate_result(vkAllocateCommandBuffers(vk->device.logical.handle, &info, cmd_bufs),
+                        "failed to allocate command buffer");
 }
 
 static Shader *create_shader(Vulkan *vk, cstr spirv_path, VkShaderStageFlagBits stage) {
@@ -992,14 +1002,14 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     viewport.scissorCount  = info->scissors.count;
     viewport.pScissors     = info->scissors.data;
 
+    // Reference attachment array in color_blend struct.
+    info->color_blend.attachmentCount = info->color_blend_attachments.count;
+    info->color_blend.pAttachments    = info->color_blend_attachments.data;
+
     // VkPipelineDynamicStateCreateInfo dynamic_state = {};
     // dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     // dynamic_state.dynamicStateCount = info->dynamic_states.count;
     // dynamic_state.pDynamicStates = info->dynamic_states.data;
-
-    // Reference attachment array in color_blend struct.
-    info->color_blend.attachmentCount = info->color_blend_attachments.count;
-    info->color_blend.pAttachments    = info->color_blend_attachments.data;
 
     VkGraphicsPipelineCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1027,4 +1037,14 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     ctk_pop_frame(vk->mem.temp);
 
     return pipeline;
+}
+
+static u32 next_swapchain_img_idx(Vulkan *vk, VkSemaphore sema4, VkFence fence) {
+    u32 img_idx = CTK_U32_MAX;
+
+    vtk_validate_result(
+        vkAcquireNextImageKHR(vk->device.logical.handle, vk->swapchain.handle, CTK_U64_MAX, sema4, fence, &img_idx),
+        "failed to aquire next swapchain image");
+
+    return img_idx;
 }

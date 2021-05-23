@@ -30,8 +30,6 @@ struct Graphics {
     } region;
 
     RenderPass *main_render_pass;
-    CTK_Array<VkFramebuffer> *swapchain_framebufs;
-    CTK_Array<VkCommandBuffer> *render_cmd_bufs;
 
     struct {
         ShaderGroup triangle;
@@ -49,6 +47,21 @@ struct Graphics {
         Pipeline *direct;
     } pipeline;
 
+    struct {
+        u32 idx;
+        CTK_Array<VkFramebuffer>   *framebufs;
+        CTK_Array<VkCommandBuffer> *render_cmd_bufs;
+        CTK_Array<VkSemaphore>     *img_sema4s;
+
+        struct {
+            CTK_Array<VkSemaphore> *img_aquired;
+            // CTK_Array<VkSemaphore> *render_finished;
+        } sema4s;
+
+        // struct {
+        //     CTK_Array<VkFence> *in_flight;
+        // } fences;
+    } frame_state;
 };
 
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
@@ -137,30 +150,6 @@ static void create_render_passes(Graphics *gfx, App *app, Vulkan *vk) {
     }
 }
 
-static void create_framebuffers(Graphics *gfx, App *app, Vulkan *vk) {
-    {
-        gfx->swapchain_framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
-
-        // Create framebuffer for each swapchain image.
-        for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
-            ctk_push_frame(app->mem.temp);
-
-            FramebufferInfo info = {
-                .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
-                .extent      = get_surface_extent(vk),
-                .layers      = 1,
-            };
-
-            ctk_push(info.attachments, vk->swapchain.image_views[i]);
-
-            ctk_push(gfx->swapchain_framebufs,
-                create_framebuffer(vk->device.logical.handle, gfx->main_render_pass->handle, &info));
-
-            ctk_pop_frame(app->mem.temp);
-        }
-    }
-}
-
 static void create_shaders(Graphics *gfx, Vulkan *vk) {
     gfx->shader = {
         .triangle = {
@@ -209,15 +198,49 @@ static void create_pipelines(Graphics *gfx, App *app, Vulkan *vk) {
     }
 }
 
+static void create_framebufs(Graphics *gfx, App *app, Vulkan *vk) {
+    {
+        gfx->frame_state.framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+
+        // Create framebuffer for each swapchain image.
+        for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
+            ctk_push_frame(app->mem.temp);
+
+            FramebufferInfo info = {
+                .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
+                .extent      = get_surface_extent(vk),
+                .layers      = 1,
+            };
+
+            ctk_push(info.attachments, vk->swapchain.image_views[i]);
+
+            ctk_push(gfx->swap_state.framebufs,
+                create_framebuf(vk->device.logical.handle, gfx->main_render_pass->handle, &info));
+
+            ctk_pop_frame(app->mem.temp);
+        }
+    }
+}
+
+static void create_cmd_bufs(Graphics *gfx, App *app, Vulkan *vk) {
+    auto render_cmd_bufs = ctk_create_array_full<VkCommandBuffer>(app->mem.fixed, vk->swapchain.image_count);
+    alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, render_cmd_bufs->count, render_cmd_bufs->data);
+    gfx->frame_state.render_cmd_bufs = render_cmd_bufs;
+}
+
 static Graphics *create_graphics(App *app, Vulkan *vk) {
     Graphics *gfx = ctk_alloc<Graphics>(app->mem.fixed, 1);
     create_buffers(gfx, vk);
     allocate_regions(gfx, vk);
     create_render_passes(gfx, app, vk);
-    create_framebuffers(gfx, app, vk);
     create_shaders(gfx, vk);
     create_descriptor_sets(gfx, vk);
     create_pipelines(gfx, app, vk);
+
+    // Frame State
+    create_framebufs(gfx, app, vk);
+    create_cmd_bufs(gfx, app, vk);
+
     return gfx;
 }
 
@@ -228,6 +251,12 @@ static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
     ctk_push(app->vertexes, {  0.4f, -0.4f, 0 });
 
     write_to_host_region(vk, gfx->region.mesh, app->vertexes->data, app->vertexes->count);
+}
+
+static void render(Graphics *gfx, Vulkan *vk) {
+    u32 swapchain_img_idx = next_swapchain_img_idx(vk, gfx->frame_state);
+
+
 }
 
 s32 main() {
@@ -265,12 +294,13 @@ s32 main() {
 
     // Main Loop
     while (platform->window->open) {
-        // Handle Input
+        // Input
         process_events(platform->window);
         if (key_down(platform, INPUT_KEY_ESCAPE))
             break;
 
-        // ...
+        // Rendering
+        render(gfx, vk);
     }
 
     return 0;
