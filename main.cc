@@ -275,27 +275,49 @@ static Frame *get_next_frame(Graphics *gfx) {
 static void render(Graphics *gfx, Vulkan *vk) {
     Frame *frame = get_next_frame(gfx);
     u32 swapchain_img_idx = get_next_swapchain_img_idx(vk, frame->img_aquired, VK_NULL_HANDLE);
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
-    VkSubmitInfo submit_info = {};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.pNext = NULL;
-    submit_info.waitSemaphoreCount   = 1;
-    submit_info.pWaitSemaphores      = &frame->img_aquired;
-    submit_info.pWaitDstStageMask    = &wait_stage;
-    submit_info.commandBufferCount   = 0;
-    submit_info.pCommandBuffers      = NULL;
-    submit_info.signalSemaphoreCount = 0;
-    submit_info.pSignalSemaphores    = NULL;
+    // Rendering
+    {
+        VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
-    vtk_validate_result(vkQueueSubmit(vk->queue.graphics, 1, &submit_info, frame->in_flight),
-                        "vkQueueSubmit failed");
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = NULL;
+        submit_info.waitSemaphoreCount   = 1;
+        submit_info.pWaitSemaphores      = &frame->img_aquired;
+        submit_info.pWaitDstStageMask    = &wait_stage;
+        submit_info.commandBufferCount   = 0;
+        submit_info.pCommandBuffers      = NULL;
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores    = &frame->render_finished;
 
-    vtk_validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX),
-                        "vkWaitForFences failed");
+        vtk_validate_result(vkQueueSubmit(vk->queue.graphics, 1, &submit_info, frame->in_flight),
+                            "vkQueueSubmit failed");
 
-    vtk_validate_result(vkResetFences(vk->device, 1, &frame->in_flight),
-                        "vkResetFences failed");
+        vtk_validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX),
+                            "vkWaitForFences failed");
+
+        vtk_validate_result(vkResetFences(vk->device, 1, &frame->in_flight),
+                            "vkResetFences failed");
+    }
+
+    // Presentation
+    {
+        VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
+        VkPresentInfoKHR present_info = {};
+        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.pNext = NULL;
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores    = &frame->render_finished;
+        present_info.swapchainCount     = 1;
+        present_info.pSwapchains        = &vk->swapchain.handle;
+        present_info.pImageIndices      = &swapchain_img_idx;
+        present_info.pResults           = NULL;
+
+        vtk_validate_result(vkQueuePresentKHR(vk->queue.present, &present_info),
+                            "vkQueuePresentKHR failed");
+    }
 }
 
 s32 main() {
