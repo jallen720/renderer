@@ -271,10 +271,10 @@ s32 main() {
     // Create Modules
     Platform *platform = create_platform(app->mem.platform, {
         .surface = {
-            .x      = 2560 - 1920,   // Right Align
-            .y      = 60,            // Align to Top Taskbar
-            .width  = 1920,
-            .height = 1080,
+            .x      = 600,
+            .y      = 100,
+            .width  = 1280,
+            .height = 720,
         },
         .title = L"Renderer",
     });
