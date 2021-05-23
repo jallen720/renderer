@@ -24,7 +24,7 @@ struct QueueFamilyIndexes {
 
 struct PhysicalDevice {
     VkPhysicalDevice handle;
-    QueueFamilyIndexes queue_family_indexes;
+    QueueFamilyIndexes queue_family_idxs;
     VkPhysicalDeviceFeatures features;
     VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties mem_properties;
@@ -232,29 +232,31 @@ static void init_surface(Vulkan *vk, Platform *platform) {
                         "failed to get win32 surface");
 }
 
-static QueueFamilyIndexes find_queue_family_indexes(Vulkan *vk, VkPhysicalDevice physical_device) {
+static QueueFamilyIndexes find_queue_family_idxs(Vulkan *vk, VkPhysicalDevice physical_device) {
     ctk_push_frame(vk->mem.temp);
 
-    QueueFamilyIndexes queue_family_indexes = { .graphics = CTK_U32_MAX, .present = CTK_U32_MAX };
+    QueueFamilyIndexes queue_family_idxs = { .graphics = CTK_U32_MAX, .present = CTK_U32_MAX };
     auto queue_family_props_array =
         vtk_load_vk_objects<VkQueueFamilyProperties>(
             vk->mem.temp,
             vkGetPhysicalDeviceQueueFamilyProperties,
             physical_device);
 
-    for (u32 queue_family_index = 0; queue_family_index < queue_family_props_array->count; ++queue_family_index) {
-        VkQueueFamilyProperties *queue_family_props = queue_family_props_array->data + queue_family_index;
+    for (u32 queue_family_idx = 0; queue_family_idx < queue_family_props_array->count; ++queue_family_idx) {
+        VkQueueFamilyProperties *queue_family_props = queue_family_props_array->data + queue_family_idx;
+
         if (queue_family_props->queueFlags & VK_QUEUE_GRAPHICS_BIT)
-            queue_family_indexes.graphics = queue_family_index;
+            queue_family_idxs.graphics = queue_family_idx;
 
         VkBool32 present_supported = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, vk->surface, &present_supported);
+        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_idx, vk->surface, &present_supported);
+
         if (present_supported == VK_TRUE)
-            queue_family_indexes.present = queue_family_index;
+            queue_family_idxs.present = queue_family_idx;
     }
 
     ctk_pop_frame(vk->mem.temp);
-    return queue_family_indexes;
+    return queue_family_idxs;
 }
 
 static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<PhysicalDevice *> *physical_devices,
@@ -272,8 +274,8 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<Physi
         PhysicalDevice *physical_device = physical_devices->data[i];
 
         // Check for queue families that support vk and present.
-        bool has_required_queue_families = physical_device->queue_family_indexes.graphics != CTK_U32_MAX &&
-                                           physical_device->queue_family_indexes.present != CTK_U32_MAX;
+        bool has_required_queue_families = physical_device->queue_family_idxs.graphics != CTK_U32_MAX &&
+                                           physical_device->queue_family_idxs.present != CTK_U32_MAX;
 
         bool requested_features_supported = true;
         if (requested_features) {
@@ -315,7 +317,7 @@ static void load_physical_device(Vulkan *vk, CTK_Array<s32> *requested_features)
         VkPhysicalDevice vk_physical_device = vk_physical_devices->data[i];
         PhysicalDevice *physical_device = ctk_push(physical_devices);
         physical_device->handle = vk_physical_device;
-        physical_device->queue_family_indexes = find_queue_family_indexes(vk, vk_physical_device);
+        physical_device->queue_family_idxs = find_queue_family_idxs(vk, vk_physical_device);
 
         vkGetPhysicalDeviceFeatures(vk_physical_device, &physical_device->features);
         vkGetPhysicalDeviceProperties(vk_physical_device, &physical_device->properties);
@@ -352,11 +354,11 @@ static void load_physical_device(Vulkan *vk, CTK_Array<s32> *requested_features)
 
 static void init_device(Vulkan *vk, CTK_Array<s32> *requested_features) {
     CTK_FixedArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
-    ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_family_indexes.graphics));
+    ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_family_idxs.graphics));
 
     // Don't create separate queues if present and vk belong to same queue family.
-    if (vk->physical_device.queue_family_indexes.present != vk->physical_device.queue_family_indexes.graphics)
-        ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_family_indexes.present));
+    if (vk->physical_device.queue_family_idxs.present != vk->physical_device.queue_family_idxs.graphics)
+        ctk_push(&queue_infos, vtk_default_queue_info(vk->physical_device.queue_family_idxs.present));
 
     cstr extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     VkBool32 enabled_features[VTK_PHYSICAL_DEVICE_FEATURE_COUNT] = {};
@@ -380,8 +382,8 @@ static void init_device(Vulkan *vk, CTK_Array<s32> *requested_features) {
 
 static void init_queues(Vulkan *vk) {
     // Get logical vk->device.logical queues.
-    vkGetDeviceQueue(vk->device, vk->physical_device.queue_family_indexes.graphics, 0, &vk->queue.graphics);
-    vkGetDeviceQueue(vk->device, vk->physical_device.queue_family_indexes.present,  0, &vk->queue.present);
+    vkGetDeviceQueue(vk->device, vk->physical_device.queue_family_idxs.graphics, 0, &vk->queue.graphics);
+    vkGetDeviceQueue(vk->device, vk->physical_device.queue_family_idxs.present,  0, &vk->queue.present);
 }
 
 static VkSurfaceCapabilitiesKHR get_surface_capabilities(Vulkan *vk) {
@@ -457,11 +459,11 @@ static void init_swapchain(Vulkan *vk) {
     ////////////////////////////////////////////////////////////
     /// Creation
     ////////////////////////////////////////////////////////////
-    u32 graphics_queue_family_index = vk->physical_device.queue_family_indexes.graphics;
-    u32 present_queue_family_index = vk->physical_device.queue_family_indexes.present;
-    u32 queue_family_indexes[] = {
-        graphics_queue_family_index,
-        present_queue_family_index,
+    u32 graphics_queue_family_idx = vk->physical_device.queue_family_idxs.graphics;
+    u32 present_queue_family_idx = vk->physical_device.queue_family_idxs.present;
+    u32 queue_family_idxs[] = {
+        graphics_queue_family_idx,
+        present_queue_family_idx,
     };
 
     VkSwapchainCreateInfoKHR info = {};
@@ -480,10 +482,10 @@ static void init_swapchain(Vulkan *vk) {
     info.presentMode = selected_present_mode;
     info.clipped = VK_TRUE;
     info.oldSwapchain = VK_NULL_HANDLE;
-    if (graphics_queue_family_index != present_queue_family_index) {
+    if (graphics_queue_family_idx != present_queue_family_idx) {
         info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        info.queueFamilyIndexCount = CTK_ARRAY_SIZE(queue_family_indexes);
-        info.pQueueFamilyIndices = queue_family_indexes;
+        info.queueFamilyIndexCount = CTK_ARRAY_SIZE(queue_family_idxs);
+        info.pQueueFamilyIndices = queue_family_idxs;
     }
     else {
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -534,7 +536,7 @@ static void init_cmd_pool(Vulkan *vk) {
     VkCommandPoolCreateInfo command_pool_info = {};
     command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    command_pool_info.queueFamilyIndex = vk->physical_device.queue_family_indexes.graphics;
+    command_pool_info.queueFamilyIndex = vk->physical_device.queue_family_idxs.graphics;
     vtk_validate_result(vkCreateCommandPool(vk->device, &command_pool_info, NULL, &vk->cmd_pool),
                         "failed to create command pool");
 }
@@ -597,15 +599,13 @@ static Buffer *create_buffer(Vulkan *vk, BufferInfo *buffer_info) {
     info.sharingMode = buffer_info->sharing_mode;
     info.queueFamilyIndexCount = 0;
     info.pQueueFamilyIndices = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
-    vtk_validate_result(vkCreateBuffer(vk->device, &info, NULL, &buffer->handle),
-                        "failed to create buffer");
+    vtk_validate_result(vkCreateBuffer(vk->device, &info, NULL, &buffer->handle), "failed to create buffer");
 
     // Allocate / Bind Memory
     VkMemoryRequirements mem_reqs = {};
     vkGetBufferMemoryRequirements(vk->device, buffer->handle, &mem_reqs);
     buffer->mem = allocate_device_memory(vk, mem_reqs, buffer_info->mem_property_flags);
-    vtk_validate_result(vkBindBufferMemory(vk->device, buffer->handle, buffer->mem, 0),
-                        "failed to bind buffer memory");
+    vtk_validate_result(vkBindBufferMemory(vk->device, buffer->handle, buffer->mem, 0), "failed to bind buffer memory");
 
     return buffer;
 }
@@ -754,8 +754,7 @@ static VkDescriptorPool create_descriptor_pool(Vulkan *vk, DescriptorPoolInfo in
     pool_info.poolSizeCount = pool_sizes.count;
     pool_info.pPoolSizes = pool_sizes.data;
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    vtk_validate_result(vkCreateDescriptorPool(vk->device, &pool_info, NULL, &pool),
-                        "failed to create descriptor pool");
+    vtk_validate_result(vkCreateDescriptorPool(vk->device, &pool_info, NULL, &pool), "failed to create descriptor pool");
 
     return pool;
 }
@@ -767,8 +766,7 @@ create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bind
     info.bindingCount = binding_count;
     info.pBindings = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-    vtk_validate_result(vkCreateDescriptorSetLayout(device, &info, NULL, &layout),
-                        "error creating descriptor set layout");
+    vtk_validate_result(vkCreateDescriptorSetLayout(device, &info, NULL, &layout), "error creating descriptor set layout");
 
     return layout;
 }
@@ -1017,8 +1015,7 @@ static void alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count, Vk
     info.commandPool        = vk->cmd_pool;
     info.level              = level;
     info.commandBufferCount = count;
-    vtk_validate_result(vkAllocateCommandBuffers(vk->device, &info, cmd_bufs),
-                        "failed to allocate command buffer");
+    vtk_validate_result(vkAllocateCommandBuffers(vk->device, &info, cmd_bufs), "failed to allocate command buffer");
 }
 
 static VkSemaphore create_semaphore(Vulkan *vk) {
@@ -1027,8 +1024,7 @@ static VkSemaphore create_semaphore(Vulkan *vk) {
     info.pNext = NULL;
     info.flags = 0;
     VkSemaphore semaphore = VK_NULL_HANDLE;
-    vtk_validate_result(vkCreateSemaphore(vk->device, &info, NULL, &semaphore),
-                        "failed to create semaphore");
+    vtk_validate_result(vkCreateSemaphore(vk->device, &info, NULL, &semaphore), "failed to create semaphore");
 
     return semaphore;
 }
@@ -1039,8 +1035,7 @@ static VkFence create_fence(Vulkan *vk) {
     info.pNext = NULL;
     info.flags = 0;//VK_FENCE_CREATE_SIGNALED_BIT;
     VkFence fence = VK_NULL_HANDLE;
-    vtk_validate_result(vkCreateFence(vk->device, &info, NULL, &fence),
-                        "failed to create fence");
+    vtk_validate_result(vkCreateFence(vk->device, &info, NULL, &fence), "failed to create fence");
 
     return fence;
 }
