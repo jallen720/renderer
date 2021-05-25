@@ -291,14 +291,9 @@ static void render(Graphics *gfx, Vulkan *vk) {
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores    = &frame->render_finished;
 
-        vtk_validate_result(vkQueueSubmit(vk->queue.graphics, 1, &submit_info, frame->in_flight),
-                            "vkQueueSubmit failed");
-
-        vtk_validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX),
-                            "vkWaitForFences failed");
-
-        vtk_validate_result(vkResetFences(vk->device, 1, &frame->in_flight),
-                            "vkResetFences failed");
+        validate_result(vkQueueSubmit(vk->queue.graphics, 1, &submit_info, frame->in_flight), "vkQueueSubmit failed");
+        validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX), "vkWaitForFences failed");
+        validate_result(vkResetFences(vk->device, 1, &frame->in_flight), "vkResetFences failed");
     }
 
     // Presentation
@@ -315,9 +310,82 @@ static void render(Graphics *gfx, Vulkan *vk) {
         present_info.pImageIndices      = &swapchain_img_idx;
         present_info.pResults           = NULL;
 
-        vtk_validate_result(vkQueuePresentKHR(vk->queue.present, &present_info),
-                            "vkQueuePresentKHR failed");
+        validate_result(vkQueuePresentKHR(vk->queue.present, &present_info), "vkQueuePresentKHR failed");
     }
+}
+
+static void hack(App *app, Vulkan *vk) {
+    ctk_push_frame(app->mem.temp);
+
+    auto swapchain_images = load_vk_objects<VkImage>(app->mem.temp, vkGetSwapchainImagesKHR, vk->device,
+                                                     vk->swapchain.handle);
+
+    // for (u32 i = 0; i < swapchain_images->count; ++i) {
+    //     vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
+    //         VkImageMemoryBarrier pre_mem_barrier = {};
+    //         pre_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    //         pre_mem_barrier.srcAccessMask = 0;
+    //         pre_mem_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    //         pre_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    //         pre_mem_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    //         pre_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    //         pre_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    //         pre_mem_barrier.image = tex.handle;
+    //         pre_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    //         pre_mem_barrier.subresourceRange.baseMipLevel = 0;
+    //         pre_mem_barrier.subresourceRange.levelCount = 1;
+    //         pre_mem_barrier.subresourceRange.baseArrayLayer = 0;
+    //         pre_mem_barrier.subresourceRange.layerCount = 1;
+    //         vkCmdPipelineBarrier(app->cmd_bufs.one_time,
+    //                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    //                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+    //                              0, // Dependency Flags
+    //                              0, NULL, // Memory Barriers
+    //                              0, NULL, // Buffer Memory Barriers
+    //                              1, &pre_mem_barrier); // Image Memory Barriers
+
+    //         VkBufferImageCopy copy = {};
+    //         copy.bufferOffset = 0;
+    //         copy.bufferRowLength = 0;
+    //         copy.bufferImageHeight = 0;
+    //         copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    //         copy.imageSubresource.mipLevel = 0;
+    //         copy.imageSubresource.baseArrayLayer = 0;
+    //         copy.imageSubresource.layerCount = 1;
+    //         copy.imageOffset.x = 0;
+    //         copy.imageOffset.y = 0;
+    //         copy.imageOffset.z = 0;
+    //         copy.imageExtent.width = width;
+    //         copy.imageExtent.height = height;
+    //         copy.imageExtent.depth = 1;
+    //         vkCmdCopyBufferToImage(app->cmd_bufs.one_time, vk->staging_region.buffer->handle, tex.handle,
+    //                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    //         VkImageMemoryBarrier post_mem_barrier = {};
+    //         post_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    //         post_mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    //         post_mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    //         post_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    //         post_mem_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    //         post_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    //         post_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    //         post_mem_barrier.image = tex.handle;
+    //         post_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    //         post_mem_barrier.subresourceRange.baseMipLevel = 0;
+    //         post_mem_barrier.subresourceRange.levelCount = 1;
+    //         post_mem_barrier.subresourceRange.baseArrayLayer = 0;
+    //         post_mem_barrier.subresourceRange.layerCount = 1;
+    //         vkCmdPipelineBarrier(app->cmd_bufs.one_time,
+    //                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+    //                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    //                              0, // Dependency Flags
+    //                              0, NULL, // Memory Barriers
+    //                              0, NULL, // Buffer Memory Barriers
+    //                              1, &post_mem_barrier); // Image Memory Barriers
+    //     vtk_submit_one_time_command_buffer(app->cmd_bufs.one_time, vk->device.queues.graphics);
+    // }
+
+    ctk_pop_frame(app->mem.temp);
 }
 
 s32 main() {
@@ -364,7 +432,7 @@ s32 main() {
             break;
 
         // Rendering
-        render(gfx, vk);
+        // render(gfx, vk);
     }
 
     return 0;

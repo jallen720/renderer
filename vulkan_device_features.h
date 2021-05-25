@@ -1,0 +1,137 @@
+#pragma once
+
+#include <vulkan/vulkan.h>
+#include "ctk/ctk.h"
+
+////////////////////////////////////////////////////////////
+/// Data
+////////////////////////////////////////////////////////////
+enum PhysicalDeviceFeature {
+    PHYSICAL_DEVICE_FEATURE_robustBufferAccess,
+    PHYSICAL_DEVICE_FEATURE_fullDrawIndexUint32,
+    PHYSICAL_DEVICE_FEATURE_imageCubeArray,
+    PHYSICAL_DEVICE_FEATURE_independentBlend,
+    PHYSICAL_DEVICE_FEATURE_geometryShader,
+    PHYSICAL_DEVICE_FEATURE_tessellationShader,
+    PHYSICAL_DEVICE_FEATURE_sampleRateShading,
+    PHYSICAL_DEVICE_FEATURE_dualSrcBlend,
+    PHYSICAL_DEVICE_FEATURE_logicOp,
+    PHYSICAL_DEVICE_FEATURE_multiDrawIndirect,
+    PHYSICAL_DEVICE_FEATURE_drawIndirectFirstInstance,
+    PHYSICAL_DEVICE_FEATURE_depthClamp,
+    PHYSICAL_DEVICE_FEATURE_depthBiasClamp,
+    PHYSICAL_DEVICE_FEATURE_fillModeNonSolid,
+    PHYSICAL_DEVICE_FEATURE_depthBounds,
+    PHYSICAL_DEVICE_FEATURE_wideLines,
+    PHYSICAL_DEVICE_FEATURE_largePoints,
+    PHYSICAL_DEVICE_FEATURE_alphaToOne,
+    PHYSICAL_DEVICE_FEATURE_multiViewport,
+    PHYSICAL_DEVICE_FEATURE_samplerAnisotropy,
+    PHYSICAL_DEVICE_FEATURE_textureCompressionETC2,
+    PHYSICAL_DEVICE_FEATURE_textureCompressionASTC_LDR,
+    PHYSICAL_DEVICE_FEATURE_textureCompressionBC,
+    PHYSICAL_DEVICE_FEATURE_occlusionQueryPrecise,
+    PHYSICAL_DEVICE_FEATURE_pipelineStatisticsQuery,
+    PHYSICAL_DEVICE_FEATURE_vertexPipelineStoresAndAtomics,
+    PHYSICAL_DEVICE_FEATURE_fragmentStoresAndAtomics,
+    PHYSICAL_DEVICE_FEATURE_shaderTessellationAndGeometryPointSize,
+    PHYSICAL_DEVICE_FEATURE_shaderImageGatherExtended,
+    PHYSICAL_DEVICE_FEATURE_shaderStorageImageExtendedFormats,
+    PHYSICAL_DEVICE_FEATURE_shaderStorageImageMultisample,
+    PHYSICAL_DEVICE_FEATURE_shaderStorageImageReadWithoutFormat,
+    PHYSICAL_DEVICE_FEATURE_shaderStorageImageWriteWithoutFormat,
+    PHYSICAL_DEVICE_FEATURE_shaderUniformBufferArrayDynamicIndexing,
+    PHYSICAL_DEVICE_FEATURE_shaderSampledImageArrayDynamicIndexing,
+    PHYSICAL_DEVICE_FEATURE_shaderStorageBufferArrayDynamicIndexing,
+    PHYSICAL_DEVICE_FEATURE_shaderStorageImageArrayDynamicIndexing,
+    PHYSICAL_DEVICE_FEATURE_shaderClipDistance,
+    PHYSICAL_DEVICE_FEATURE_shaderCullDistance,
+    PHYSICAL_DEVICE_FEATURE_shaderFloat64,
+    PHYSICAL_DEVICE_FEATURE_shaderInt64,
+    PHYSICAL_DEVICE_FEATURE_shaderInt16,
+    PHYSICAL_DEVICE_FEATURE_shaderResourceResidency,
+    PHYSICAL_DEVICE_FEATURE_shaderResourceMinLod,
+    PHYSICAL_DEVICE_FEATURE_sparseBinding,
+    PHYSICAL_DEVICE_FEATURE_sparseResidencyBuffer,
+    PHYSICAL_DEVICE_FEATURE_sparseResidencyImage2D,
+    PHYSICAL_DEVICE_FEATURE_sparseResidencyImage3D,
+    PHYSICAL_DEVICE_FEATURE_sparseResidency2Samples,
+    PHYSICAL_DEVICE_FEATURE_sparseResidency4Samples,
+    PHYSICAL_DEVICE_FEATURE_sparseResidency8Samples,
+    PHYSICAL_DEVICE_FEATURE_sparseResidency16Samples,
+    PHYSICAL_DEVICE_FEATURE_sparseResidencyAliased,
+    PHYSICAL_DEVICE_FEATURE_variableMultisampleRate,
+    PHYSICAL_DEVICE_FEATURE_inheritedQueries,
+    PHYSICAL_DEVICE_FEATURE_COUNT,
+};
+
+static cstr const _PHYSICAL_DEVICE_FEATURE_NAMES[] = {
+    "robustBufferAccess",
+    "fullDrawIndexUint32",
+    "imageCubeArray",
+    "independentBlend",
+    "geometryShader",
+    "tessellationShader",
+    "sampleRateShading",
+    "dualSrcBlend",
+    "logicOp",
+    "multiDrawIndirect",
+    "drawIndirectFirstInstance",
+    "depthClamp",
+    "depthBiasClamp",
+    "fillModeNonSolid",
+    "depthBounds",
+    "wideLines",
+    "largePoints",
+    "alphaToOne",
+    "multiViewport",
+    "samplerAnisotropy",
+    "textureCompressionETC2",
+    "textureCompressionASTC_LDR",
+    "textureCompressionBC",
+    "occlusionQueryPrecise",
+    "pipelineStatisticsQuery",
+    "vertexPipelineStoresAndAtomics",
+    "fragmentStoresAndAtomics",
+    "shaderTessellationAndGeometryPointSize",
+    "shaderImageGatherExtended",
+    "shaderStorageImageExtendedFormats",
+    "shaderStorageImageMultisample",
+    "shaderStorageImageReadWithoutFormat",
+    "shaderStorageImageWriteWithoutFormat",
+    "shaderUniformBufferArrayDynamicIndexing",
+    "shaderSampledImageArrayDynamicIndexing",
+    "shaderStorageBufferArrayDynamicIndexing",
+    "shaderStorageImageArrayDynamicIndexing",
+    "shaderClipDistance",
+    "shaderCullDistance",
+    "shaderFloat64",
+    "shaderInt64",
+    "shaderInt16",
+    "shaderResourceResidency",
+    "shaderResourceMinLod",
+    "sparseBinding",
+    "sparseResidencyBuffer",
+    "sparseResidencyImage2D",
+    "sparseResidencyImage3D",
+    "sparseResidency2Samples",
+    "sparseResidency4Samples",
+    "sparseResidency8Samples",
+    "sparseResidency16Samples",
+    "sparseResidencyAliased",
+    "variableMultisampleRate",
+    "inheritedQueries",
+};
+
+////////////////////////////////////////////////////////////
+/// Interface
+////////////////////////////////////////////////////////////
+static cstr physical_device_feature_name(PhysicalDeviceFeature feat) {
+    CTK_ASSERT(feat < PHYSICAL_DEVICE_FEATURE_COUNT);
+    return _PHYSICAL_DEVICE_FEATURE_NAMES[feat];
+}
+
+static bool physical_device_feature_supported(PhysicalDeviceFeature feat, VkPhysicalDeviceFeatures *phys_dev_feats) {
+    CTK_ASSERT(feat < PHYSICAL_DEVICE_FEATURE_COUNT);
+    return ((VkBool32 *)phys_dev_feats)[feat];
+}
