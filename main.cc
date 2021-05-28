@@ -62,6 +62,8 @@ struct Graphics {
         u32 current_frame_idx;
         CTK_Array<Frame> *frames;
     } sync;
+
+    VkCommandBuffer temp_cmd_buf;
 };
 
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
@@ -198,9 +200,9 @@ static void create_pipelines(Graphics *gfx, App *app, Vulkan *vk) {
     }
 }
 
-static void create_framebufs(Graphics *gfx, App *app, Vulkan *vk) {
+static void init_swap_state(Graphics *gfx, App *app, Vulkan *vk) {
     {
-        // gfx->frame_state.framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+        // gfx->swap_state.framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
 
         // // Create framebuffer for each swapchain image.
         // for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
@@ -218,15 +220,12 @@ static void create_framebufs(Graphics *gfx, App *app, Vulkan *vk) {
         //     ctk_pop_frame(app->mem.temp);
         // }
     }
+
+    // gfx->swap_state.render_cmd_bufs = alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, render_cmd_bufs->count);
 }
 
-static void create_cmd_bufs(Graphics *gfx, App *app, Vulkan *vk) {
-    // auto render_cmd_bufs = ctk_create_array_full<VkCommandBuffer>(app->mem.fixed, vk->swapchain.image_count);
-    // alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, render_cmd_bufs->count, render_cmd_bufs->data);
-    // gfx->frame_state.render_cmd_bufs = render_cmd_bufs;
-}
-
-static void create_frames(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
+static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
+    gfx->sync.current_frame_idx = CTK_U32_MAX;
     gfx->sync.frames = ctk_create_array<Frame>(app->mem.fixed, frame_count);
 
     for (u32 i = 0; i < frame_count; ++i) {
@@ -236,8 +235,6 @@ static void create_frames(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) 
             .in_flight       = create_fence(vk),
         });
     }
-
-    gfx->sync.current_frame_idx = CTK_U32_MAX;
 }
 
 static Graphics *create_graphics(App *app, Vulkan *vk) {
@@ -249,9 +246,9 @@ static Graphics *create_graphics(App *app, Vulkan *vk) {
     create_descriptor_sets(gfx, vk);
     create_pipelines(gfx, app, vk);
 
-    create_framebufs(gfx, app, vk);
-    create_cmd_bufs(gfx, app, vk);
-    create_frames(gfx, app, vk, 1);
+    init_swap_state(gfx, app, vk);
+    init_sync(gfx, app, vk, 1);
+    alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1, &gfx->temp_cmd_buf);
 
     return gfx;
 }
@@ -281,8 +278,8 @@ static void render(Graphics *gfx, Vulkan *vk) {
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
         VkSubmitInfo submit_info = {};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.pNext = NULL;
+        submit_info.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext                = NULL;
         submit_info.waitSemaphoreCount   = 1;
         submit_info.pWaitSemaphores      = &frame->img_aquired;
         submit_info.pWaitDstStageMask    = &wait_stage;
@@ -292,8 +289,6 @@ static void render(Graphics *gfx, Vulkan *vk) {
         submit_info.pSignalSemaphores    = &frame->render_finished;
 
         validate_result(vkQueueSubmit(vk->queue.graphics, 1, &submit_info, frame->in_flight), "vkQueueSubmit failed");
-        validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX), "vkWaitForFences failed");
-        validate_result(vkResetFences(vk->device, 1, &frame->in_flight), "vkResetFences failed");
     }
 
     // Presentation
@@ -301,8 +296,8 @@ static void render(Graphics *gfx, Vulkan *vk) {
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
         VkPresentInfoKHR present_info = {};
-        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        present_info.pNext = NULL;
+        present_info.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.pNext              = NULL;
         present_info.waitSemaphoreCount = 1;
         present_info.pWaitSemaphores    = &frame->render_finished;
         present_info.swapchainCount     = 1;
@@ -312,78 +307,48 @@ static void render(Graphics *gfx, Vulkan *vk) {
 
         validate_result(vkQueuePresentKHR(vk->queue.present, &present_info), "vkQueuePresentKHR failed");
     }
+
+    validate_result(vkWaitForFences(vk->device, 1, &frame->in_flight, VK_TRUE, CTK_U64_MAX), "vkWaitForFences failed");
+    validate_result(vkResetFences(vk->device, 1, &frame->in_flight), "vkResetFences failed");
 }
 
-static void hack(App *app, Vulkan *vk) {
+static void hack(Graphics *gfx, App *app, Vulkan *vk) {
     ctk_push_frame(app->mem.temp);
 
     auto swapchain_images = load_vk_objects<VkImage>(app->mem.temp, vkGetSwapchainImagesKHR, vk->device,
                                                      vk->swapchain.handle);
 
-    // for (u32 i = 0; i < swapchain_images->count; ++i) {
-    //     vtk_begin_one_time_command_buffer(app->cmd_bufs.one_time);
-    //         VkImageMemoryBarrier pre_mem_barrier = {};
-    //         pre_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    //         pre_mem_barrier.srcAccessMask = 0;
-    //         pre_mem_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    //         pre_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    //         pre_mem_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    //         pre_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    //         pre_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    //         pre_mem_barrier.image = tex.handle;
-    //         pre_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    //         pre_mem_barrier.subresourceRange.baseMipLevel = 0;
-    //         pre_mem_barrier.subresourceRange.levelCount = 1;
-    //         pre_mem_barrier.subresourceRange.baseArrayLayer = 0;
-    //         pre_mem_barrier.subresourceRange.layerCount = 1;
-    //         vkCmdPipelineBarrier(app->cmd_bufs.one_time,
-    //                              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-    //                              VK_PIPELINE_STAGE_TRANSFER_BIT,
-    //                              0, // Dependency Flags
-    //                              0, NULL, // Memory Barriers
-    //                              0, NULL, // Buffer Memory Barriers
-    //                              1, &pre_mem_barrier); // Image Memory Barriers
+    for (u32 i = 0; i < swapchain_images->count; ++i) {
+        VkImage img = swapchain_images->data[i];
 
-    //         VkBufferImageCopy copy = {};
-    //         copy.bufferOffset = 0;
-    //         copy.bufferRowLength = 0;
-    //         copy.bufferImageHeight = 0;
-    //         copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    //         copy.imageSubresource.mipLevel = 0;
-    //         copy.imageSubresource.baseArrayLayer = 0;
-    //         copy.imageSubresource.layerCount = 1;
-    //         copy.imageOffset.x = 0;
-    //         copy.imageOffset.y = 0;
-    //         copy.imageOffset.z = 0;
-    //         copy.imageExtent.width = width;
-    //         copy.imageExtent.height = height;
-    //         copy.imageExtent.depth = 1;
-    //         vkCmdCopyBufferToImage(app->cmd_bufs.one_time, vk->staging_region.buffer->handle, tex.handle,
-    //                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        begin_temp_cmd_buf(gfx->temp_cmd_buf);
 
-    //         VkImageMemoryBarrier post_mem_barrier = {};
-    //         post_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    //         post_mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    //         post_mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    //         post_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    //         post_mem_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    //         post_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    //         post_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    //         post_mem_barrier.image = tex.handle;
-    //         post_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    //         post_mem_barrier.subresourceRange.baseMipLevel = 0;
-    //         post_mem_barrier.subresourceRange.levelCount = 1;
-    //         post_mem_barrier.subresourceRange.baseArrayLayer = 0;
-    //         post_mem_barrier.subresourceRange.layerCount = 1;
-    //         vkCmdPipelineBarrier(app->cmd_bufs.one_time,
-    //                              VK_PIPELINE_STAGE_TRANSFER_BIT,
-    //                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-    //                              0, // Dependency Flags
-    //                              0, NULL, // Memory Barriers
-    //                              0, NULL, // Buffer Memory Barriers
-    //                              1, &post_mem_barrier); // Image Memory Barriers
-    //     vtk_submit_one_time_command_buffer(app->cmd_bufs.one_time, vk->device.queues.graphics);
-    // }
+        VkImageMemoryBarrier barrier = {};
+        barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask       = 0;
+        barrier.dstAccessMask       = 0;
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = img;
+        barrier.subresourceRange = {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1,
+        };
+        vkCmdPipelineBarrier(gfx->temp_cmd_buf,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             0,            // Dependency Flags
+                             0, NULL,      // Memory Barriers
+                             0, NULL,      // Buffer Memory Barriers
+                             1, &barrier); // Image Memory Barriers
+
+        submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
+    }
 
     ctk_pop_frame(app->mem.temp);
 }
@@ -423,6 +388,7 @@ s32 main() {
 
     // render(gfx, vk);
     // render(gfx, vk);
+    hack(gfx, app, vk);
 
     // Main Loop
     while (platform->window->open) {
@@ -432,7 +398,7 @@ s32 main() {
             break;
 
         // Rendering
-        // render(gfx, vk);
+        render(gfx, vk);
     }
 
     return 0;
