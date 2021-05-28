@@ -1116,23 +1116,29 @@ static void alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count, Vk
     validate_result(vkAllocateCommandBuffers(vk->device, &info, cmd_bufs), "failed to allocate command buffer");
 }
 
+static CTK_Array<VkCommandBuffer> *alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count) {
+    auto cmd_bufs = ctk_create_array_full<VkCommandBuffer>(vk->mem.module, count);
+    alloc_cmd_bufs(vk, level, count, cmd_bufs->data);
+    return cmd_bufs;
+}
+
 ////////////////////////////////////////////////////////////
 /// Command Buffer
 ////////////////////////////////////////////////////////////
-static void begin_temp_commands(VkCommandBuffer cmd_buf) {
+static void begin_temp_cmd_buf(VkCommandBuffer cmd_buf) {
     VkCommandBufferBeginInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    info.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     info.pInheritanceInfo = NULL;
     vkBeginCommandBuffer(cmd_buf, &info);
 }
 
-static void submit_temp_commands(VkCommandBuffer cmd_buf, VkQueue queue) {
+static void submit_temp_cmd_buf(VkCommandBuffer cmd_buf, VkQueue queue) {
     vkEndCommandBuffer(cmd_buf);
     VkSubmitInfo submit_info = {};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &cmd_buf;
+    submit_info.pCommandBuffers    = &cmd_buf;
     validate_result(vkQueueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE), "failed to submit temp command buffer");
     vkQueueWaitIdle(queue);
 }
