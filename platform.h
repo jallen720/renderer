@@ -46,26 +46,31 @@ static Platform *_instance;
 static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPARAM w_param, _In_ LPARAM l_param) {
     if (_instance && _instance->window->handle == hwnd) {
         switch (msg) {
+            case WM_QUIT: {
+                ctk_print_line("WM_QUIT");
+                break;
+            }
             case WM_DESTROY: {
+                _instance->window->open = false;
                 PostQuitMessage(0);
-                return 0;
+                break;
             }
             case WM_PAINT: {
                 PAINTSTRUCT paint_struct = {};
                 HDC device_context = BeginPaint(hwnd, &paint_struct);
                 FillRect(device_context, &paint_struct.rcPaint, (HBRUSH)(COLOR_WINDOW + 1));
                 EndPaint(hwnd, &paint_struct);
-                return 0;
+                break;
             }
             case WM_KEYDOWN: {
                 ctk_print_line("WM_KEYDOWN");
                 _instance->window->key_down[w_param] = true;
-                return 0;
+                break;
             }
             case WM_KEYUP: {
                 ctk_print_line("WM_KEYUP");
                 _instance->window->key_down[w_param] = false;
-                return 0;
+                break;
             }
             case WM_SYSKEYDOWN: {
                 ctk_print_line("WM_SYSKEYDOWN");
@@ -79,6 +84,7 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
             }
         }
     }
+
     return DefWindowProc(hwnd, msg, w_param, l_param);
 }
 
@@ -146,12 +152,10 @@ static Platform *create_platform(CTK_Allocator *module_mem, WindowInfo window_in
 
 static void process_events(Window *window) {
     MSG msg;
-    window->open = GetMessage(&msg, window->handle, 0, 0); // Stay open as long as WM_QUIT message isn't generated.
-    if (!window->open)
-        return;
-
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
+    if (PeekMessage(&msg, window->handle, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
 }
 
 static bool key_down(Platform *platform, s32 key) {
