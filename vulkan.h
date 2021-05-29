@@ -270,11 +270,11 @@ static void init_instance(Vulkan *vk) {
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app_info.pNext = NULL;
-    app_info.pApplicationName = "renderer";
+    app_info.pApplicationName   = "renderer";
     app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.pEngineName = "renderer";
-    app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.apiVersion = VK_API_VERSION_1_0;
+    app_info.pEngineName        = "renderer";
+    app_info.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
+    app_info.apiVersion         = VK_API_VERSION_1_0;
 
     cstr extensions[] = {
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
@@ -290,10 +290,10 @@ static void init_instance(Vulkan *vk) {
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     info.pNext = &debug_messenger_info;
     info.flags = 0;
-    info.pApplicationInfo = &app_info;
-    info.enabledLayerCount = CTK_ARRAY_SIZE(layers);
-    info.ppEnabledLayerNames = layers;
-    info.enabledExtensionCount = CTK_ARRAY_SIZE(extensions);
+    info.pApplicationInfo        = &app_info;
+    info.enabledLayerCount       = CTK_ARRAY_SIZE(layers);
+    info.ppEnabledLayerNames     = layers;
+    info.enabledExtensionCount   = CTK_ARRAY_SIZE(extensions);
     info.ppEnabledExtensionNames = extensions;
     validate_result(vkCreateInstance(&info, NULL, &instance->handle), "failed to create Vulkan instance");
 
@@ -306,7 +306,7 @@ static void init_instance(Vulkan *vk) {
 static void init_surface(Vulkan *vk, Platform *platform) {
     VkWin32SurfaceCreateInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    info.hwnd = platform->window->handle;
+    info.hwnd      = platform->window->handle;
     info.hinstance = platform->instance;
     validate_result(vkCreateWin32SurfaceKHR(vk->instance.handle, &info, nullptr, &vk->surface),
                     "failed to get win32 surface");
@@ -446,13 +446,13 @@ static void init_device(Vulkan *vk, CTK_Array<PhysicalDeviceFeature> *requested_
     VkDeviceCreateInfo logical_device_info = {};
     logical_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     logical_device_info.flags = 0;
-    logical_device_info.queueCreateInfoCount = queue_infos.count;
-    logical_device_info.pQueueCreateInfos = queue_infos.data;
-    logical_device_info.enabledLayerCount = 0;
-    logical_device_info.ppEnabledLayerNames = NULL;
-    logical_device_info.enabledExtensionCount = CTK_ARRAY_SIZE(extensions);
+    logical_device_info.queueCreateInfoCount    = queue_infos.count;
+    logical_device_info.pQueueCreateInfos       = queue_infos.data;
+    logical_device_info.enabledLayerCount       = 0;
+    logical_device_info.ppEnabledLayerNames     = NULL;
+    logical_device_info.enabledExtensionCount   = CTK_ARRAY_SIZE(extensions);
     logical_device_info.ppEnabledExtensionNames = extensions;
-    logical_device_info.pEnabledFeatures = (VkPhysicalDeviceFeatures *)enabled_features;
+    logical_device_info.pEnabledFeatures        = (VkPhysicalDeviceFeatures *)enabled_features;
     validate_result(vkCreateDevice(vk->physical_device.handle, &logical_device_info, NULL, &vk->device),
                     "failed to create logical device");
 }
@@ -545,29 +545,29 @@ static void init_swapchain(Vulkan *vk) {
 
     VkSwapchainCreateInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    info.surface = vk->surface;
     info.flags = 0;
-    info.minImageCount = selected_image_count;
-    info.imageFormat = selected_format.format;
-    info.imageColorSpace = selected_format.colorSpace;
-    info.imageExtent = surface_capabilities.currentExtent;
+    info.surface          = vk->surface;
+    info.minImageCount    = selected_image_count;
+    info.imageFormat      = selected_format.format;
+    info.imageColorSpace  = selected_format.colorSpace;
+    info.imageExtent      = surface_capabilities.currentExtent;
     info.imageArrayLayers = 1; // Always 1 for standard images.
-    info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    info.preTransform = surface_capabilities.currentTransform;
-    info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    info.presentMode = selected_present_mode;
-    info.clipped = VK_TRUE;
-    info.oldSwapchain = VK_NULL_HANDLE;
+    info.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                            VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info.preTransform     = surface_capabilities.currentTransform;
+    info.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    info.presentMode      = selected_present_mode;
+    info.clipped          = VK_TRUE;
+    info.oldSwapchain     = VK_NULL_HANDLE;
     if (graphics_queue_family_idx != present_queue_family_idx) {
-        info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        info.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         info.queueFamilyIndexCount = CTK_ARRAY_SIZE(queue_family_idxs);
-        info.pQueueFamilyIndices = queue_family_idxs;
+        info.pQueueFamilyIndices   = queue_family_idxs;
     }
     else {
-        info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        info.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
         info.queueFamilyIndexCount = 0;
-        info.pQueueFamilyIndices = NULL;
+        info.pQueueFamilyIndices   = NULL;
     }
     validate_result(vkCreateSwapchainKHR(vk->device, &info, NULL, &vk->swapchain.handle), "failed to create swapchain");
 
@@ -587,19 +587,19 @@ static void init_swapchain(Vulkan *vk) {
     for (u32 i = 0; i < swap_imgs->count; ++i) {
         VkImageViewCreateInfo view_info = {};
         view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_info.image = swap_imgs->data[i];
         view_info.flags = 0;
+        view_info.image    = swap_imgs->data[i];
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format = vk->swapchain.image_format;
+        view_info.format   = vk->swapchain.image_format;
         view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
         view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
         view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_info.subresourceRange.baseMipLevel = 0;
-        view_info.subresourceRange.levelCount = 1;
+        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.baseMipLevel   = 0;
+        view_info.subresourceRange.levelCount     = 1;
         view_info.subresourceRange.baseArrayLayer = 0;
-        view_info.subresourceRange.layerCount = 1;
+        view_info.subresourceRange.layerCount     = 1;
         validate_result(vkCreateImageView(vk->device, &view_info, NULL, vk->swapchain.image_views.data + i),
                         "failed to create image view");
     }
@@ -655,7 +655,7 @@ allocate_device_memory(Vulkan *vk, VkMemoryRequirements mem_reqs, VkMemoryProper
     // Allocate memory
     VkMemoryAllocateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    info.allocationSize = mem_reqs.size;
+    info.allocationSize  = mem_reqs.size;
     info.memoryTypeIndex = find_memory_type_index(vk->physical_device.mem_properties, mem_reqs,
                                                       mem_property_flags);
     VkDeviceMemory mem = VK_NULL_HANDLE;
@@ -669,11 +669,11 @@ static Buffer *create_buffer(Vulkan *vk, BufferInfo *buffer_info) {
 
     VkBufferCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    info.size = buffer_info->size;
-    info.usage = buffer_info->usage_flags;
-    info.sharingMode = buffer_info->sharing_mode;
+    info.size                  = buffer_info->size;
+    info.usage                 = buffer_info->usage_flags;
+    info.sharingMode           = buffer_info->sharing_mode;
     info.queueFamilyIndexCount = 0;
-    info.pQueueFamilyIndices = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+    info.pQueueFamilyIndices   = NULL; // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
     validate_result(vkCreateBuffer(vk->device, &info, NULL, &buffer->handle), "failed to create buffer");
 
     // Allocate / Bind Memory
@@ -759,12 +759,12 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
     // Render Pass
     VkRenderPassCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    create_info.attachmentCount =   info->attachment.descriptions->count;
-    create_info.pAttachments =      info->attachment.descriptions->data;
-    create_info.subpassCount =      subpass_descriptions->count;
-    create_info.pSubpasses =        subpass_descriptions->data;
-    create_info.dependencyCount =   info->subpass.dependencies->count;
-    create_info.pDependencies =     info->subpass.dependencies->data;
+    create_info.attachmentCount = info->attachment.descriptions->count;
+    create_info.pAttachments =    info->attachment.descriptions->data;
+    create_info.subpassCount =    subpass_descriptions->count;
+    create_info.pSubpasses =      subpass_descriptions->data;
+    create_info.dependencyCount = info->subpass.dependencies->count;
+    create_info.pDependencies =   info->subpass.dependencies->data;
     validate_result(vkCreateRenderPass(vk->device, &create_info, NULL, &render_pass->handle),
                     "failed to create render pass");
 
@@ -783,7 +783,7 @@ static Shader *create_shader(Vulkan *vk, cstr spirv_path, VkShaderStageFlagBits 
     info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     info.flags = 0;
     info.codeSize = ctk_byte_size(byte_code);
-    info.pCode = (u32 const *)byte_code->data;
+    info.pCode    = (u32 const *)byte_code->data;
     validate_result(vkCreateShaderModule(vk->device, &info, NULL, &shader->handle),
                     "failed to create shader from SPIR-V bytecode in \"%p\"", spirv_path);
 
@@ -825,9 +825,9 @@ static VkDescriptorPool create_descriptor_pool(Vulkan *vk, DescriptorPoolInfo in
     VkDescriptorPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.flags = 0;
-    pool_info.maxSets = info.max_descriptor_sets;
+    pool_info.maxSets       = info.max_descriptor_sets;
     pool_info.poolSizeCount = pool_sizes.count;
-    pool_info.pPoolSizes = pool_sizes.data;
+    pool_info.pPoolSizes    = pool_sizes.data;
     VkDescriptorPool pool = VK_NULL_HANDLE;
     validate_result(vkCreateDescriptorPool(vk->device, &pool_info, NULL, &pool), "failed to create descriptor pool");
 
@@ -839,7 +839,7 @@ create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bind
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = binding_count;
-    info.pBindings = bindings;
+    info.pBindings    = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     validate_result(vkCreateDescriptorSetLayout(device, &info, NULL, &layout), "error creating descriptor set layout");
 
@@ -853,12 +853,12 @@ create_descriptor_set_layout(VkDevice device, CTK_Array<VkDescriptorSetLayoutBin
 
 static PipelineInfo const DEFAULT_PIPELINE_INFO = {
     .input_assembly = {
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .primitiveRestartEnable = VK_FALSE,
     },
     .depth_stencil = {
-        .sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable       = VK_FALSE,
         .depthWriteEnable      = VK_FALSE,
         .depthCompareOp        = VK_COMPARE_OP_LESS,
@@ -886,7 +886,7 @@ static PipelineInfo const DEFAULT_PIPELINE_INFO = {
         .maxDepthBounds = 1.0f,
     },
     .rasterization = {
-        .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .depthClampEnable        = VK_FALSE, // Don't clamp fragments within depth range.
         .rasterizerDiscardEnable = VK_FALSE,
         .polygonMode             = VK_POLYGON_MODE_FILL, // Only available mode on AMD gpus?
@@ -899,7 +899,7 @@ static PipelineInfo const DEFAULT_PIPELINE_INFO = {
         .lineWidth               = 1.0f,
     },
     .multisample = {
-        .sType                 = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples  = VK_SAMPLE_COUNT_1_BIT,
         .sampleShadingEnable   = VK_FALSE,
         .minSampleShading      = 1.0f,
@@ -908,7 +908,7 @@ static PipelineInfo const DEFAULT_PIPELINE_INFO = {
         .alphaToOneEnable      = VK_FALSE,
     },
     .color_blend = {
-        .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .logicOpEnable   = VK_FALSE,
         .logicOp         = VK_LOGIC_OP_COPY,
         .attachmentCount = 0,
@@ -937,8 +937,8 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     for (u32 i = 0; i < info->shaders.count; ++i) {
         Shader *shader = info->shaders.data[i];
         VkPipelineShaderStageCreateInfo *shader_stage_info = ctk_push(shader_stages);
-        shader_stage_info->sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stage_info->flags  = 0;
+        shader_stage_info->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shader_stage_info->flags = 0;
         shader_stage_info->stage  = shader->stage;
         shader_stage_info->module = shader->handle;
         shader_stage_info->pName  = "main";
@@ -1000,7 +1000,7 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     // VkPipelineViewportStateCreateInfo viewport_state = {};
     // viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     // bool dynamic_viewport = false;
-    // bool dynamic_scissor = false;
+    // bool dynamic_scissor  = false;
     // for (u32 i = 0; i < info->dynamic_states.count; ++i) {
     //     if (info->dynamic_states[i] == VK_DYNAMIC_STATE_VIEWPORT)
     //         dynamic_viewport = true;
@@ -1041,7 +1041,7 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     // VkPipelineDynamicStateCreateInfo dynamic_state = {};
     // dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     // dynamic_state.dynamicStateCount = info->dynamic_states.count;
-    // dynamic_state.pDynamicStates = info->dynamic_states.data;
+    // dynamic_state.pDynamicStates    = info->dynamic_states.data;
 
     VkGraphicsPipelineCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1135,7 +1135,7 @@ static void begin_temp_cmd_buf(VkCommandBuffer cmd_buf) {
 static void submit_temp_cmd_buf(VkCommandBuffer cmd_buf, VkQueue queue) {
     vkEndCommandBuffer(cmd_buf);
     VkSubmitInfo submit_info = {};
-    submit_info.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers    = &cmd_buf;
     validate_result(vkQueueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE), "failed to submit temp command buffer");

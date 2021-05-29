@@ -298,6 +298,20 @@ static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
     }
 }
 
+static void next_frame(Graphics *gfx, Vulkan *vk) {
+    // Update current frame and wait until it is no longer in-flight.
+    if (++gfx->sync.curr_frame_idx >= gfx->sync.frames->size)
+        gfx->sync.curr_frame_idx = 0;
+
+    gfx->sync.frame = gfx->sync.frames->data + gfx->sync.curr_frame_idx;
+    validate_result(vkWaitForFences(vk->device, 1, &gfx->sync.frame->in_flight, VK_TRUE, CTK_U64_MAX),
+                    "vkWaitForFences failed");
+    validate_result(vkResetFences(vk->device, 1, &gfx->sync.frame->in_flight), "vkResetFences failed");
+
+    // Once current frame is not in-flight, it is safe to use it's img_aquired semaphore and aquire next swap image.
+    gfx->sync.swap_img_idx = next_swap_img_idx(vk, gfx->sync.frame->img_aquired, VK_NULL_HANDLE);
+}
+
 static void render(Graphics *gfx, Vulkan *vk) {
     VkCommandBuffer cmd_buf = gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
@@ -327,20 +341,6 @@ static void render(Graphics *gfx, Vulkan *vk) {
     vkCmdEndRenderPass(cmd_buf);
 
     vkEndCommandBuffer(cmd_buf);
-}
-
-static void next_frame(Graphics *gfx, Vulkan *vk) {
-    // Update current frame and wait until it is no longer in-flight.
-    if (++gfx->sync.curr_frame_idx >= gfx->sync.frames->size)
-        gfx->sync.curr_frame_idx = 0;
-
-    gfx->sync.frame = gfx->sync.frames->data + gfx->sync.curr_frame_idx;
-    validate_result(vkWaitForFences(vk->device, 1, &gfx->sync.frame->in_flight, VK_TRUE, CTK_U64_MAX),
-                    "vkWaitForFences failed");
-    validate_result(vkResetFences(vk->device, 1, &gfx->sync.frame->in_flight), "vkResetFences failed");
-
-    // Once current frame is not in-flight, it is safe to use it's img_aquired semaphore and aquire next swap image.
-    gfx->sync.swap_img_idx = next_swap_img_idx(vk, gfx->sync.frame->img_aquired, VK_NULL_HANDLE);
 }
 
 static void present(Graphics *gfx, Vulkan *vk) {
