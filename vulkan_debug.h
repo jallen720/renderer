@@ -83,10 +83,11 @@ static void validate_result(VkResult result, cstr fail_message, Args... args) {
 }
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL
-debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity_flag_bit,
-                   VkDebugUtilsMessageTypeFlagsEXT message_type_flags,
-                   VkDebugUtilsMessengerCallbackDataEXT const *callback_data,
-                   void *user_data) {
+debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT     message_severity_flag_bit,
+               VkDebugUtilsMessageTypeFlagsEXT            message_type_flags,
+               VkDebugUtilsMessengerCallbackDataEXT const *callback_data,
+               void                                       *user_data)
+{
     cstr message_id = callback_data->pMessageIdName ? callback_data->pMessageIdName : "";
 
     if (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT & message_severity_flag_bit)

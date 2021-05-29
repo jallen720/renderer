@@ -5,5 +5,5 @@ layout (location = 0) in vec3 in_vert_pos;
 layout (location = 0) out vec4 color;
 
 void main() {
-    color = vec4(in_vert_pos, 1);
+    color = vec4(in_vert_pos + vec3(0.5), 1);
 }

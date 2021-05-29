@@ -34,12 +34,12 @@ struct QueueFamilyIndexes {
 };
 
 struct PhysicalDevice {
-    VkPhysicalDevice handle;
-    QueueFamilyIndexes queue_family_idxs;
-    VkPhysicalDeviceFeatures features;
-    VkPhysicalDeviceProperties properties;
+    VkPhysicalDevice                 handle;
+    QueueFamilyIndexes               queue_family_idxs;
+    VkPhysicalDeviceFeatures         features;
+    VkPhysicalDeviceProperties       properties;
     VkPhysicalDeviceMemoryProperties mem_properties;
-    VkFormat depth_image_format;
+    VkFormat                         depth_image_format;
 };
 
 struct Swapchain {
@@ -578,17 +578,16 @@ static void init_swapchain(Vulkan *vk) {
     ////////////////////////////////////////////////////////////
     /// Image View Creation
     ////////////////////////////////////////////////////////////
-    auto swapchain_images = load_vk_objects<VkImage>(vk->mem.temp, vkGetSwapchainImagesKHR, vk->device,
-                                                     vk->swapchain.handle);
+    auto swap_imgs = load_vk_objects<VkImage>(vk->mem.temp, vkGetSwapchainImagesKHR, vk->device, vk->swapchain.handle);
 
-    CTK_ASSERT(swapchain_images->count <= ctk_size(&vk->swapchain.image_views));
-    vk->swapchain.image_views.count = swapchain_images->count;
-    vk->swapchain.image_count = swapchain_images->count;
+    CTK_ASSERT(swap_imgs->count <= ctk_size(&vk->swapchain.image_views));
+    vk->swapchain.image_views.count = swap_imgs->count;
+    vk->swapchain.image_count = swap_imgs->count;
 
-    for (u32 i = 0; i < swapchain_images->count; ++i) {
+    for (u32 i = 0; i < swap_imgs->count; ++i) {
         VkImageViewCreateInfo view_info = {};
         view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_info.image = swapchain_images->data[i];
+        view_info.image = swap_imgs->data[i];
         view_info.flags = 0;
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
         view_info.format = vk->swapchain.image_format;
@@ -686,7 +685,7 @@ static Buffer *create_buffer(Vulkan *vk, BufferInfo *buffer_info) {
     return buffer;
 }
 
-static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSize align = 1) {
+static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSize align = 16) {
     VkDeviceSize align_offset = buffer->end % align;
 
     auto region = ctk_alloc(vk->pool.region);
@@ -705,7 +704,7 @@ static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSiz
 }
 
 static void write_to_host_region(Vulkan *vk, Region *region, void *data, u32 size) {
-    CTK_ASSERT(size < region->size);
+    CTK_ASSERT(size <= region->size);
     void *mapped_mem = NULL;
     vkMapMemory(vk->device, region->buffer->mem, region->offset, size, 0, &mapped_mem);
     memcpy(mapped_mem, data, size);
@@ -892,7 +891,7 @@ static PipelineInfo const DEFAULT_PIPELINE_INFO = {
         .rasterizerDiscardEnable = VK_FALSE,
         .polygonMode             = VK_POLYGON_MODE_FILL, // Only available mode on AMD gpus?
         .cullMode                = VK_CULL_MODE_BACK_BIT,
-        .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .frontFace               = VK_FRONT_FACE_CLOCKWISE,
         .depthBiasEnable         = VK_FALSE,
         .depthBiasConstantFactor = 0.0f,
         .depthBiasClamp          = 0.0f,
@@ -1071,7 +1070,7 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     return pipeline;
 }
 
-static VkFramebuffer create_framebuffer(VkDevice device, VkRenderPass rp, FramebufferInfo *info) {
+static VkFramebuffer create_framebuf(VkDevice device, VkRenderPass rp, FramebufferInfo *info) {
     VkFramebufferCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     create_info.renderPass      = rp;
@@ -1100,7 +1099,7 @@ static VkFence create_fence(Vulkan *vk) {
     VkFenceCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     info.pNext = NULL;
-    info.flags = 0;//VK_FENCE_CREATE_SIGNALED_BIT;
+    info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     VkFence fence = VK_NULL_HANDLE;
     validate_result(vkCreateFence(vk->device, &info, NULL, &fence), "failed to create fence");
 
@@ -1127,8 +1126,8 @@ static CTK_Array<VkCommandBuffer> *alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLev
 ////////////////////////////////////////////////////////////
 static void begin_temp_cmd_buf(VkCommandBuffer cmd_buf) {
     VkCommandBufferBeginInfo info = {};
-    info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    info.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     info.pInheritanceInfo = NULL;
     vkBeginCommandBuffer(cmd_buf, &info);
 }
@@ -1146,7 +1145,7 @@ static void submit_temp_cmd_buf(VkCommandBuffer cmd_buf, VkQueue queue) {
 ////////////////////////////////////////////////////////////
 /// Rendering
 ////////////////////////////////////////////////////////////
-static u32 get_next_swapchain_img_idx(Vulkan *vk, VkSemaphore semaphore, VkFence fence) {
+static u32 next_swap_img_idx(Vulkan *vk, VkSemaphore semaphore, VkFence fence) {
     u32 img_idx = CTK_U32_MAX;
 
     validate_result(vkAcquireNextImageKHR(vk->device, vk->swapchain.handle, CTK_U64_MAX, semaphore, fence, &img_idx),
