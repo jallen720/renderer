@@ -82,10 +82,8 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
         info.size = 256 * CTK_MEGABYTE;
         info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
         info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
-                           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-
-                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-
+                           // VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                           // VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         info.mem_property_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -274,12 +272,18 @@ static void push_mesh(Graphics *gfx, Vulkan *vk, CTK_Array<CTK_Vec3<f32>> *verte
     Mesh *mesh = ctk_push(gfx->meshes, {
         .vertexes      = vertexes,
         .indexes       = indexes,
-        .vertex_region = allocate_region(vk, gfx->buffer.host, ctk_byte_size(vertexes), 64),
-        .index_region  = allocate_region(vk, gfx->buffer.host, ctk_byte_size(indexes),  64),
+        .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 64),
+        .index_region  = allocate_region(vk, gfx->buffer.device, byte_count(indexes),  64),
     });
 
-    write_to_host_region(vk, mesh->vertex_region, mesh->vertexes->data, ctk_byte_count(mesh->vertexes));
-    write_to_host_region(vk, mesh->index_region,  mesh->indexes->data,  ctk_byte_count(mesh->indexes));
+    // write_to_host_region(vk, mesh->vertex_region, mesh->vertexes->data, byte_count(mesh->vertexes));
+    // write_to_host_region(vk, mesh->index_region,  mesh->indexes->data,  byte_count(mesh->indexes));
+    begin_temp_cmd_buf(gfx->temp_cmd_buf);
+        write_to_device_region(vk, mesh->vertex_region, gfx->region.staging, gfx->temp_cmd_buf,
+                               mesh->vertexes->data, byte_count(mesh->vertexes));
+        write_to_device_region(vk, mesh->index_region, gfx->region.staging, gfx->temp_cmd_buf,
+                               mesh->indexes->data, byte_count(mesh->indexes));
+    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
 static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {

@@ -711,10 +711,17 @@ static void write_to_host_region(Vulkan *vk, Region *region, void *data, u32 siz
     vkUnmapMemory(vk->device, region->buffer->mem);
 }
 
-static void write_to_device_region(Vulkan *vk, Region *region, Region *staging_region, void *data, u32 size) {
+static void write_to_device_region(Vulkan *vk, Region *region, Region *staging_region, VkCommandBuffer cmd_buf,
+                                   void *data, u32 size)
+{
     write_to_host_region(vk, staging_region, data, size);
 
+    VkBufferCopy copy = {};
+    copy.srcOffset = staging_region->offset;
+    copy.dstOffset = region->offset;
+    copy.size      = size;
 
+    vkCmdCopyBuffer(cmd_buf, staging_region->buffer->handle, region->buffer->handle, 1, &copy);
 }
 
 ////////////////////////////////////////////////////////////
