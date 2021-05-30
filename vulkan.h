@@ -9,6 +9,8 @@
 #include "renderer/vulkan_device_features.h"
 #include "renderer/platform.h"
 
+using namespace ctk;
+
 ////////////////////////////////////////////////////////////
 /// Macros
 ////////////////////////////////////////////////////////////
@@ -44,7 +46,7 @@ struct PhysicalDevice {
 
 struct Swapchain {
     VkSwapchainKHR handle;
-    CTK_FixedArray<VkImageView, 4> image_views;
+    FixedArray<VkImageView, 4> image_views;
     u32 image_count;
     VkFormat image_format;
     VkExtent2D extent;
@@ -71,9 +73,9 @@ struct Region {
 };
 
 struct SubpassInfo {
-    CTK_Array<u32> *preserve_attachment_indexes;
-    CTK_Array<VkAttachmentReference> *input_attachment_references;
-    CTK_Array<VkAttachmentReference> *color_attachment_references;
+    Array<u32> *preserve_attachment_indexes;
+    Array<VkAttachmentReference> *input_attachment_references;
+    Array<VkAttachmentReference> *color_attachment_references;
     VkAttachmentReference *depth_attachment_reference;
 };
 
@@ -84,23 +86,23 @@ struct AttachmentInfo {
 
 struct RenderPassInfo {
     struct {
-        CTK_Array<VkAttachmentDescription> *descriptions;
-        CTK_Array<VkClearValue> *clear_values;
+        Array<VkAttachmentDescription> *descriptions;
+        Array<VkClearValue> *clear_values;
     } attachment;
 
     struct {
-        CTK_Array<SubpassInfo> *infos;
-        CTK_Array<VkSubpassDependency> *dependencies;
+        Array<SubpassInfo> *infos;
+        Array<VkSubpassDependency> *dependencies;
     } subpass;
 };
 
 struct RenderPass {
     VkRenderPass handle;
-    CTK_Array<VkClearValue> *attachment_clear_values;
+    Array<VkClearValue> *attachment_clear_values;
 };
 
 struct FramebufferInfo {
-    CTK_Array<VkImageView> *attachments;
+    Array<VkImageView> *attachments;
     VkExtent2D extent;
     u32 layers;
 };
@@ -122,13 +124,13 @@ struct DescriptorPoolInfo {
 };
 
 struct PipelineInfo {
-    CTK_FixedArray<Shader *,   8> shaders;
-    CTK_FixedArray<VkViewport, 4> viewports;
-    CTK_FixedArray<VkRect2D,   4> scissors;
-    CTK_FixedArray<VkPipelineColorBlendAttachmentState, 4> color_blend_attachments;
+    FixedArray<Shader *,   8> shaders;
+    FixedArray<VkViewport, 4> viewports;
+    FixedArray<VkRect2D,   4> scissors;
+    FixedArray<VkPipelineColorBlendAttachmentState, 4> color_blend_attachments;
 
-    CTK_Array<VkDescriptorSetLayout> *descriptor_set_layouts;
-    CTK_Array<VkPushConstantRange>   *push_constant_ranges;
+    Array<VkDescriptorSetLayout> *descriptor_set_layouts;
+    Array<VkPushConstantRange>   *push_constant_ranges;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly;
     VkPipelineDepthStencilStateCreateInfo  depth_stencil;
@@ -153,16 +155,16 @@ struct VulkanInfo {
 struct Vulkan {
     // Memory
     struct {
-        CTK_Allocator *module;
-        CTK_Allocator *temp;
+        Allocator *module;
+        Allocator *temp;
     } mem;
 
     struct {
-        CTK_Pool<Buffer>     *buffer;
-        CTK_Pool<Region>     *region;
-        CTK_Pool<RenderPass> *render_pass;
-        CTK_Pool<Shader>     *shader;
-        CTK_Pool<Pipeline>   *pipeline;
+        Pool<Buffer>     *buffer;
+        Pool<Region>     *region;
+        Pool<RenderPass> *render_pass;
+        Pool<Shader>     *shader;
+        Pool<Pipeline>   *pipeline;
     } pool;
 
     // State
@@ -185,17 +187,17 @@ struct Vulkan {
 /// Utils
 ////////////////////////////////////////////////////////////
 template<typename Object, typename Loader, typename ...Args>
-static CTK_Array<Object> *load_vk_objects(CTK_Allocator *allocator, Loader loader, Args... args) {
+static Array<Object> *load_vk_objects(Allocator *allocator, Loader loader, Args... args) {
     u32 count = 0;
     loader(args..., &count, NULL);
     CTK_ASSERT(count > 0);
-    auto vk_objects = ctk_create_array_full<Object>(allocator, count, 0);
+    auto vk_objects = create_array_full<Object>(allocator, count, 0);
     loader(args..., &vk_objects->count, vk_objects->data);
     return vk_objects;
 }
 
 static VkFormat find_depth_image_format(VkPhysicalDevice physical_device) {
-    static VkFormat const DEPTH_IMAGE_FORMATS[] = {
+    static constexpr VkFormat DEPTH_IMAGE_FORMATS[] = {
         VK_FORMAT_D32_SFLOAT_S8_UINT,
         VK_FORMAT_D32_SFLOAT,
         VK_FORMAT_D24_UNORM_S8_UINT,
@@ -203,7 +205,7 @@ static VkFormat find_depth_image_format(VkPhysicalDevice physical_device) {
         VK_FORMAT_D16_UNORM
     };
 
-    static VkFormatFeatureFlags const DEPTH_IMG_FMT_FEATS = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    static constexpr VkFormatFeatureFlags DEPTH_IMG_FMT_FEATS = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
     // Find format that supports depth-stencil attachment feature for physical device.
     for (u32 i = 0; i < CTK_ARRAY_SIZE(DEPTH_IMAGE_FORMATS); i++) {
@@ -313,9 +315,9 @@ static void init_surface(Vulkan *vk, Platform *platform) {
 }
 
 static QueueFamilyIndexes find_queue_family_idxs(Vulkan *vk, VkPhysicalDevice physical_device) {
-    ctk_push_frame(vk->mem.temp);
+    push_frame(vk->mem.temp);
 
-    QueueFamilyIndexes queue_family_idxs = { .graphics = CTK_U32_MAX, .present = CTK_U32_MAX };
+    QueueFamilyIndexes queue_family_idxs = { .graphics = U32_MAX, .present = U32_MAX };
     auto queue_family_props_array =
         load_vk_objects<VkQueueFamilyProperties>(vk->mem.temp, vkGetPhysicalDeviceQueueFamilyProperties, physical_device);
 
@@ -332,18 +334,18 @@ static QueueFamilyIndexes find_queue_family_idxs(Vulkan *vk, VkPhysicalDevice ph
             queue_family_idxs.present = queue_family_idx;
     }
 
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
     return queue_family_idxs;
 }
 
-static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<PhysicalDevice *> *physical_devices,
-                                                     CTK_Array<PhysicalDeviceFeature> *requested_features)
+static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, Array<PhysicalDevice *> *physical_devices,
+                                                     Array<PhysicalDeviceFeature> *requested_features)
 {
-    ctk_push_frame(vk->mem.temp);
+    push_frame(vk->mem.temp);
 
-    CTK_Array<PhysicalDeviceFeature> *unsupported_features =
+    Array<PhysicalDeviceFeature> *unsupported_features =
         requested_features
-        ? ctk_create_array<PhysicalDeviceFeature>(vk->mem.temp, requested_features->size)
+        ? create_array<PhysicalDeviceFeature>(vk->mem.temp, requested_features->size)
         : NULL;
 
     PhysicalDevice *suitable_device = NULL;
@@ -351,19 +353,19 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<Physi
         PhysicalDevice *physical_device = physical_devices->data[i];
 
         // Check for queue families that support vk and present.
-        bool has_required_queue_families = physical_device->queue_family_idxs.graphics != CTK_U32_MAX &&
-                                           physical_device->queue_family_idxs.present != CTK_U32_MAX;
+        bool has_required_queue_families = physical_device->queue_family_idxs.graphics != U32_MAX &&
+                                           physical_device->queue_family_idxs.present != U32_MAX;
 
         bool requested_features_supported = true;
         if (requested_features) {
-            ctk_clear(unsupported_features);
+            clear(unsupported_features);
 
             // Check that all requested features are supported.
             for (u32 feat_index = 0; feat_index < requested_features->count; ++feat_index) {
                 PhysicalDeviceFeature requested_feature = requested_features->data[feat_index];
 
                 if (!physical_device_feature_supported(requested_feature, &physical_device->features))
-                    ctk_push(unsupported_features, requested_feature);
+                    push(unsupported_features, requested_feature);
             }
 
             if (unsupported_features->count > 0) {
@@ -377,22 +379,22 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, CTK_Array<Physi
             suitable_device = physical_device;
     }
 
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
     return suitable_device;
 }
 
-static void load_physical_device(Vulkan *vk, CTK_Array<PhysicalDeviceFeature> *requested_features) {
-    ctk_push_frame(vk->mem.temp);
+static void load_physical_device(Vulkan *vk, Array<PhysicalDeviceFeature> *requested_features) {
+    push_frame(vk->mem.temp);
 
     // Load info about all physical devices.
     auto vk_physical_devices = load_vk_objects<VkPhysicalDevice>(vk->mem.temp, vkEnumeratePhysicalDevices,
                                                                  vk->instance.handle);
 
-    auto physical_devices = ctk_create_array<PhysicalDevice>(vk->mem.temp, vk_physical_devices->count);
+    auto physical_devices = create_array<PhysicalDevice>(vk->mem.temp, vk_physical_devices->count);
 
     for (u32 i = 0; i < vk_physical_devices->count; ++i) {
         VkPhysicalDevice vk_physical_device = vk_physical_devices->data[i];
-        PhysicalDevice *physical_device = ctk_push(physical_devices);
+        PhysicalDevice *physical_device = push(physical_devices);
         physical_device->handle = vk_physical_device;
         physical_device->queue_family_idxs = find_queue_family_idxs(vk, vk_physical_device);
 
@@ -403,16 +405,16 @@ static void load_physical_device(Vulkan *vk, CTK_Array<PhysicalDeviceFeature> *r
     }
 
     // Sort out discrete and integrated gpus.
-    auto discrete_devices = ctk_create_array<PhysicalDevice *>(vk->mem.temp, physical_devices->count);
-    auto integrated_devices = ctk_create_array<PhysicalDevice *>(vk->mem.temp, physical_devices->count);
+    auto discrete_devices = create_array<PhysicalDevice *>(vk->mem.temp, physical_devices->count);
+    auto integrated_devices = create_array<PhysicalDevice *>(vk->mem.temp, physical_devices->count);
 
     for (u32 i = 0; i < physical_devices->count; ++i) {
         PhysicalDevice *physical_device = physical_devices->data + i;
 
         if (physical_device->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-            ctk_push(discrete_devices, physical_device);
+            push(discrete_devices, physical_device);
         else if (physical_device->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
-            ctk_push(integrated_devices, physical_device);
+            push(integrated_devices, physical_device);
     }
 
     // Find suitable discrete device, or fallback to an integrated device.
@@ -426,22 +428,22 @@ static void load_physical_device(Vulkan *vk, CTK_Array<PhysicalDeviceFeature> *r
     }
 
     vk->physical_device = *suitable_device;
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
 }
 
-static void init_device(Vulkan *vk, CTK_Array<PhysicalDeviceFeature> *requested_features) {
-    CTK_FixedArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
-    ctk_push(&queue_infos, default_queue_info(vk->physical_device.queue_family_idxs.graphics));
+static void init_device(Vulkan *vk, Array<PhysicalDeviceFeature> *requested_features) {
+    FixedArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
+    push(&queue_infos, default_queue_info(vk->physical_device.queue_family_idxs.graphics));
 
     // Don't create separate queues if present and vk belong to same queue family.
     if (vk->physical_device.queue_family_idxs.present != vk->physical_device.queue_family_idxs.graphics)
-        ctk_push(&queue_infos, default_queue_info(vk->physical_device.queue_family_idxs.present));
+        push(&queue_infos, default_queue_info(vk->physical_device.queue_family_idxs.present));
 
     cstr extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    VkBool32 enabled_features[PHYSICAL_DEVICE_FEATURE_COUNT] = {};
+    VkBool32 enabled_features[(s32)PhysicalDeviceFeature::COUNT] = {};
 
     for (u32 i = 0; i < requested_features->count; ++i)
-        enabled_features[requested_features->data[i]] = VK_TRUE;
+        enabled_features[(s32)requested_features->data[i]] = VK_TRUE;
 
     VkDeviceCreateInfo logical_device_info = {};
     logical_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -476,7 +478,7 @@ static VkExtent2D get_surface_extent(Vulkan *vk) {
 }
 
 static void init_swapchain(Vulkan *vk) {
-    ctk_push_frame(vk->mem.temp);
+    push_frame(vk->mem.temp);
     VkSurfaceCapabilitiesKHR surface_capabilities = get_surface_capabilities(vk);
 
     ////////////////////////////////////////////////////////////
@@ -580,7 +582,7 @@ static void init_swapchain(Vulkan *vk) {
     ////////////////////////////////////////////////////////////
     auto swap_imgs = load_vk_objects<VkImage>(vk->mem.temp, vkGetSwapchainImagesKHR, vk->device, vk->swapchain.handle);
 
-    CTK_ASSERT(swap_imgs->count <= ctk_size(&vk->swapchain.image_views));
+    CTK_ASSERT(swap_imgs->count <= get_size(&vk->swapchain.image_views));
     vk->swapchain.image_views.count = swap_imgs->count;
     vk->swapchain.image_count = swap_imgs->count;
 
@@ -604,7 +606,7 @@ static void init_swapchain(Vulkan *vk) {
                         "failed to create image view");
     }
 
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
 }
 
 static void init_cmd_pool(Vulkan *vk) {
@@ -616,26 +618,26 @@ static void init_cmd_pool(Vulkan *vk) {
                     "failed to create command pool");
 }
 
-static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, VulkanInfo info) {
+static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanInfo info) {
     // Allocate memory for vk module.s
-    auto vk = ctk_alloc<Vulkan>(module_mem, 1);
+    auto vk = allocate<Vulkan>(module_mem, 1);
     vk->mem.module = module_mem;
-    vk->mem.temp = ctk_create_stack_allocator(module_mem, CTK_MEGABYTE);
-    vk->pool.buffer      = ctk_create_pool<Buffer>    (vk->mem.module, info.max_buffers);
-    vk->pool.region      = ctk_create_pool<Region>    (vk->mem.module, info.max_regions);
-    vk->pool.render_pass = ctk_create_pool<RenderPass>(vk->mem.module, info.max_render_passes);
-    vk->pool.shader      = ctk_create_pool<Shader>    (vk->mem.module, info.max_shaders);
-    vk->pool.pipeline    = ctk_create_pool<Pipeline>  (vk->mem.module, info.max_pipelines);
+    vk->mem.temp = create_stack_allocator(module_mem, megabyte());
+    vk->pool.buffer      = create_pool<Buffer>    (vk->mem.module, info.max_buffers);
+    vk->pool.region      = create_pool<Region>    (vk->mem.module, info.max_regions);
+    vk->pool.render_pass = create_pool<RenderPass>(vk->mem.module, info.max_render_passes);
+    vk->pool.shader      = create_pool<Shader>    (vk->mem.module, info.max_shaders);
+    vk->pool.pipeline    = create_pool<Pipeline>  (vk->mem.module, info.max_pipelines);
 
-    ctk_push_frame(vk->mem.temp);
+    push_frame(vk->mem.temp);
 
     // Initialization
     init_instance(vk);
     init_surface(vk, platform);
 
     // Physical/Logical Devices
-    auto requested_features = ctk_create_array<PhysicalDeviceFeature>(vk->mem.temp, 2);
-    ctk_push(requested_features, PHYSICAL_DEVICE_FEATURE_geometryShader);
+    auto requested_features = create_array<PhysicalDeviceFeature>(vk->mem.temp, 2);
+    push(requested_features, PhysicalDeviceFeature::geometryShader);
     load_physical_device(vk, requested_features);
     init_device(vk, requested_features);
     init_queues(vk);
@@ -643,7 +645,7 @@ static Vulkan *create_vulkan(CTK_Allocator *module_mem, Platform *platform, Vulk
     init_swapchain(vk);
     init_cmd_pool(vk);
 
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
     return vk;
 }
 
@@ -664,7 +666,7 @@ allocate_device_memory(Vulkan *vk, VkMemoryRequirements mem_reqs, VkMemoryProper
 }
 
 static Buffer *create_buffer(Vulkan *vk, BufferInfo *buffer_info) {
-    auto buffer = ctk_alloc(vk->pool.buffer);
+    auto buffer = allocate(vk->pool.buffer);
     buffer->size = buffer_info->size;
 
     VkBufferCreateInfo info = {};
@@ -688,7 +690,7 @@ static Buffer *create_buffer(Vulkan *vk, BufferInfo *buffer_info) {
 static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSize align = 16) {
     VkDeviceSize align_offset = buffer->end % align;
 
-    auto region = ctk_alloc(vk->pool.region);
+    auto region = allocate(vk->pool.region);
     region->buffer = buffer;
     region->offset = align_offset ? buffer->end - align_offset + align : buffer->end;
 
@@ -728,20 +730,20 @@ static void write_to_device_region(Vulkan *vk, Region *region, Region *staging_r
 /// Resource Creation
 ////////////////////////////////////////////////////////////
 static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
-    ctk_push_frame(vk->mem.temp);
+    push_frame(vk->mem.temp);
 
-    auto render_pass = ctk_alloc(vk->pool.render_pass);
+    auto render_pass = allocate(vk->pool.render_pass);
     render_pass->attachment_clear_values =
-        ctk_create_array<VkClearValue>(vk->mem.module, info->attachment.clear_values->count);
+        create_array<VkClearValue>(vk->mem.module, info->attachment.clear_values->count);
 
     // Clear Values
-    ctk_concat(render_pass->attachment_clear_values, info->attachment.clear_values);
+    concat(render_pass->attachment_clear_values, info->attachment.clear_values);
 
     // Subpass Descriptions
-    auto subpass_descriptions = ctk_create_array<VkSubpassDescription>(vk->mem.temp, info->subpass.infos->count);
+    auto subpass_descriptions = create_array<VkSubpassDescription>(vk->mem.temp, info->subpass.infos->count);
     for (u32 i = 0; i < info->subpass.infos->count; ++i) {
         SubpassInfo *subpass_info = info->subpass.infos->data + i;
-        VkSubpassDescription *description = ctk_push(subpass_descriptions);
+        VkSubpassDescription *description = push(subpass_descriptions);
         description->pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 
         if (subpass_info->input_attachment_references) {
@@ -775,55 +777,55 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
     validate_result(vkCreateRenderPass(vk->device, &create_info, NULL, &render_pass->handle),
                     "failed to create render pass");
 
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
     return render_pass;
 }
 
 static Shader *create_shader(Vulkan *vk, cstr spirv_path, VkShaderStageFlagBits stage) {
-    ctk_push_frame(vk->mem.temp);
+    push_frame(vk->mem.temp);
 
-    auto shader = ctk_alloc(vk->pool.shader);
+    auto shader = allocate(vk->pool.shader);
     shader->stage = stage;
 
-    CTK_Array<u8> *byte_code = ctk_read_file<u8>(vk->mem.temp, spirv_path);
+    Array<u8> *byte_code = read_file<u8>(vk->mem.temp, spirv_path);
     VkShaderModuleCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     info.flags = 0;
-    info.codeSize = ctk_byte_size(byte_code);
-    info.pCode    = (u32 const *)byte_code->data;
+    info.codeSize = byte_size(byte_code);
+    info.pCode    = (const u32 *)byte_code->data;
     validate_result(vkCreateShaderModule(vk->device, &info, NULL, &shader->handle),
                     "failed to create shader from SPIR-V bytecode in \"%p\"", spirv_path);
 
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
     return shader;
 }
 
 static VkDescriptorPool create_descriptor_pool(Vulkan *vk, DescriptorPoolInfo info) {
-    CTK_FixedArray<VkDescriptorPoolSize, 4> pool_sizes = {};
+    FixedArray<VkDescriptorPoolSize, 4> pool_sizes = {};
 
     if (info.descriptor_count.uniform_buffer) {
-        ctk_push(&pool_sizes, {
+        push(&pool_sizes, {
             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = info.descriptor_count.uniform_buffer,
         });
     }
 
     if (info.descriptor_count.uniform_buffer_dynamic) {
-        ctk_push(&pool_sizes, {
+        push(&pool_sizes, {
             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
             .descriptorCount = info.descriptor_count.uniform_buffer_dynamic,
         });
     }
 
     if (info.descriptor_count.combined_image_sampler) {
-        ctk_push(&pool_sizes, {
+        push(&pool_sizes, {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = info.descriptor_count.combined_image_sampler,
         });
     }
 
     if (info.descriptor_count.input_attachment) {
-        ctk_push(&pool_sizes, {
+        push(&pool_sizes, {
             .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
             .descriptorCount = info.descriptor_count.input_attachment,
         });
@@ -854,7 +856,7 @@ create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bind
 }
 
 static VkDescriptorSetLayout
-create_descriptor_set_layout(VkDevice device, CTK_Array<VkDescriptorSetLayoutBinding> *bindings) {
+create_descriptor_set_layout(VkDevice device, Array<VkDescriptorSetLayoutBinding> *bindings) {
     return create_descriptor_set_layout(device, bindings->data, bindings->count);
 }
 
@@ -936,14 +938,14 @@ static VkPipelineColorBlendAttachmentState const DEFAULT_COLOR_BLEND_ATTACHMENT 
 };
 
 static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpass, PipelineInfo *info) {
-    ctk_push_frame(vk->mem.temp);
-    Pipeline *pipeline = ctk_alloc(vk->pool.pipeline);
+    push_frame(vk->mem.temp);
+    Pipeline *pipeline = allocate(vk->pool.pipeline);
 
     // Shader Stages
-    auto shader_stages = ctk_create_array<VkPipelineShaderStageCreateInfo>(vk->mem.temp, info->shaders.count);
+    auto shader_stages = create_array<VkPipelineShaderStageCreateInfo>(vk->mem.temp, info->shaders.count);
     for (u32 i = 0; i < info->shaders.count; ++i) {
         Shader *shader = info->shaders.data[i];
-        VkPipelineShaderStageCreateInfo *shader_stage_info = ctk_push(shader_stages);
+        VkPipelineShaderStageCreateInfo *shader_stage_info = push(shader_stages);
         shader_stage_info->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         shader_stage_info->flags = 0;
         shader_stage_info->stage  = shader->stage;
@@ -967,11 +969,11 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
 
     // Vertex Attribute Descriptions
     // auto vert_attrib_descs =
-    //     ctk_create_array<VkVertexInputAttributeDescription>(vk->mem.temp, info->vertex_inputs->count);
+    //     create_array<VkVertexInputAttributeDescription>(vk->mem.temp, info->vertex_inputs->count);
 
     // for (u32 i = 0; i < info->vertex_inputs->count; ++i) {
     //     VertexInput *vert_input = info->vertex_inputs->data + i;
-    //     ctk_push(vert_attrib_descs, {
+    //     push(vert_attrib_descs, {
     //         .location = vert_input->location,
     //         .binding  = vert_input->binding,
     //         .format   = vert_input->attribute->format,
@@ -1072,7 +1074,7 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
                     "failed to create graphics pipeline");
 
     // Cleanup
-    ctk_pop_frame(vk->mem.temp);
+    pop_frame(vk->mem.temp);
 
     return pipeline;
 }
@@ -1122,8 +1124,8 @@ static void alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count, Vk
     validate_result(vkAllocateCommandBuffers(vk->device, &info, cmd_bufs), "failed to allocate command buffer");
 }
 
-static CTK_Array<VkCommandBuffer> *alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count) {
-    auto cmd_bufs = ctk_create_array_full<VkCommandBuffer>(vk->mem.module, count);
+static Array<VkCommandBuffer> *alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count) {
+    auto cmd_bufs = create_array_full<VkCommandBuffer>(vk->mem.module, count);
     alloc_cmd_bufs(vk, level, count, cmd_bufs->data);
     return cmd_bufs;
 }
@@ -1153,9 +1155,9 @@ static void submit_temp_cmd_buf(VkCommandBuffer cmd_buf, VkQueue queue) {
 /// Rendering
 ////////////////////////////////////////////////////////////
 static u32 next_swap_img_idx(Vulkan *vk, VkSemaphore semaphore, VkFence fence) {
-    u32 img_idx = CTK_U32_MAX;
+    u32 img_idx = U32_MAX;
 
-    validate_result(vkAcquireNextImageKHR(vk->device, vk->swapchain.handle, CTK_U64_MAX, semaphore, fence, &img_idx),
+    validate_result(vkAcquireNextImageKHR(vk->device, vk->swapchain.handle, U64_MAX, semaphore, fence, &img_idx),
                     "failed to aquire next swapchain image");
 
     return img_idx;

@@ -2,12 +2,14 @@
 #include "renderer/vulkan.h"
 #include "ctk/math.h"
 
+using namespace ctk;
+
 struct App {
     struct {
-        CTK_Allocator *fixed;
-        CTK_Allocator *temp;
-        CTK_Allocator *platform;
-        CTK_Allocator *vulkan;
+        Allocator *fixed;
+        Allocator *temp;
+        Allocator *platform;
+        Allocator *vulkan;
     } mem;
 };
 
@@ -23,8 +25,8 @@ struct Frame {
 };
 
 struct Mesh {
-    CTK_Array<CTK_Vec3<f32>> *vertexes;
-    CTK_Array<u32> *indexes;
+    Array<Vec3<f32>> *vertexes;
+    Array<u32> *indexes;
     Region *vertex_region;
     Region *index_region;
 };
@@ -60,12 +62,12 @@ struct Graphics {
     } pipeline;
 
     struct {
-        CTK_Array<VkFramebuffer> *framebufs;
-        CTK_Array<VkCommandBuffer> *render_cmd_bufs;
+        Array<VkFramebuffer> *framebufs;
+        Array<VkCommandBuffer> *render_cmd_bufs;
     } swap_state;
 
     struct {
-        CTK_Array<Frame> *frames;
+        Array<Frame> *frames;
         Frame *frame;
         u32 swap_img_idx;
         u32 curr_frame_idx;
@@ -73,13 +75,13 @@ struct Graphics {
 
     VkCommandBuffer temp_cmd_buf;
 
-    CTK_Array<Mesh> *meshes;
+    Array<Mesh> *meshes;
 };
 
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
     {
         BufferInfo info = {};
-        info.size = 256 * CTK_MEGABYTE;
+        info.size = megabyte(256);
         info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
         info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                            // VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -91,7 +93,7 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
     }
     {
         BufferInfo info = {};
-        info.size = 256 * CTK_MEGABYTE;
+        info.size = megabyte(256);
         info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
         info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -103,9 +105,9 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
 }
 
 static void allocate_regions(Graphics *gfx, Vulkan *vk) {
-    gfx->region.staging  = allocate_region(vk, gfx->buffer.host, 64 * CTK_MEGABYTE);
-    gfx->region.vertexes = allocate_region(vk, gfx->buffer.host, CTK_MEGABYTE, 64);
-    gfx->region.indexes  = allocate_region(vk, gfx->buffer.host, CTK_MEGABYTE, 64);
+    gfx->region.staging  = allocate_region(vk, gfx->buffer.host, megabyte(64));
+    gfx->region.vertexes = allocate_region(vk, gfx->buffer.host, megabyte(), 64);
+    gfx->region.indexes  = allocate_region(vk, gfx->buffer.host, megabyte(), 64);
 }
 
 static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info) {
@@ -114,24 +116,24 @@ static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info)
 
     u32 attachment_index = info->attachment.descriptions->count;
 
-    ctk_push(info->attachment.descriptions, attachment_info.description);
-    ctk_push(info->attachment.clear_values, attachment_info.clear_value);
+    push(info->attachment.descriptions, attachment_info.description);
+    push(info->attachment.clear_values, attachment_info.clear_value);
 
     return attachment_index;
 }
 
 static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
     {
-        ctk_push_frame(app->mem.temp);
+        push_frame(app->mem.temp);
 
         RenderPassInfo info = {
             .attachment = {
-                .descriptions = ctk_create_array<VkAttachmentDescription>(app->mem.temp, 1),
-                .clear_values = ctk_create_array<VkClearValue>(app->mem.temp, 1),
+                .descriptions = create_array<VkAttachmentDescription>(app->mem.temp, 1),
+                .clear_values = create_array<VkClearValue>(app->mem.temp, 1),
             },
             .subpass = {
-                .infos = ctk_create_array<SubpassInfo>(app->mem.temp, 1),
-                .dependencies = ctk_create_array<VkSubpassDependency>(app->mem.temp, 1),
+                .infos = create_array<SubpassInfo>(app->mem.temp, 1),
+                .dependencies = create_array<VkSubpassDependency>(app->mem.temp, 1),
             },
         };
 
@@ -152,16 +154,16 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
         });
 
         // Subpasses
-        SubpassInfo *subpass_info = ctk_push(info.subpass.infos);
-        subpass_info->color_attachment_references = ctk_create_array<VkAttachmentReference>(app->mem.temp, 1);
-        ctk_push(subpass_info->color_attachment_references, {
+        SubpassInfo *subpass_info = push(info.subpass.infos);
+        subpass_info->color_attachment_references = create_array<VkAttachmentReference>(app->mem.temp, 1);
+        push(subpass_info->color_attachment_references, {
             .attachment = swapchain_attachment_index,
             .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
 
         gfx->main_render_pass = create_render_pass(vk, &info);
 
-        ctk_pop_frame(app->mem.temp);
+        pop_frame(app->mem.temp);
     }
 }
 
@@ -190,14 +192,14 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
     {
-        ctk_push_frame(app->mem.temp);
+        push_frame(app->mem.temp);
 
         VkExtent2D surface_extent = get_surface_extent(vk);
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
-        ctk_push(&info.shaders, gfx->shader.triangle.vert);
-        ctk_push(&info.shaders, gfx->shader.triangle.frag);
-        ctk_push(&info.viewports, {
+        push(&info.shaders, gfx->shader.triangle.vert);
+        push(&info.shaders, gfx->shader.triangle.frag);
+        push(&info.viewports, {
             .x        = 0,
             .y        = 0,
             .width    = (f32)surface_extent.width,
@@ -205,33 +207,33 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
             .minDepth = 1,
             .maxDepth = 0,
         });
-        ctk_push(&info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
-        ctk_push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
+        push(&info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
+        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
         gfx->pipeline.direct = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
-        ctk_pop_frame(app->mem.temp);
+        pop_frame(app->mem.temp);
     }
 }
 
 static void init_swap_state(Graphics *gfx, Vulkan *vk, App *app) {
     {
-        gfx->swap_state.framebufs = ctk_create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+        gfx->swap_state.framebufs = create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
 
         // Create framebuffer for each swapchain image.
         for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
-            ctk_push_frame(app->mem.temp);
+            push_frame(app->mem.temp);
 
             FramebufferInfo info = {
-                .attachments = ctk_create_array<VkImageView>(app->mem.temp, 1),
+                .attachments = create_array<VkImageView>(app->mem.temp, 1),
                 .extent      = get_surface_extent(vk),
                 .layers      = 1,
             };
 
-            ctk_push(info.attachments, vk->swapchain.image_views[i]);
-            ctk_push(gfx->swap_state.framebufs, create_framebuf(vk->device, gfx->main_render_pass->handle, &info));
+            push(info.attachments, vk->swapchain.image_views[i]);
+            push(gfx->swap_state.framebufs, create_framebuf(vk->device, gfx->main_render_pass->handle, &info));
 
-            ctk_pop_frame(app->mem.temp);
+            pop_frame(app->mem.temp);
         }
     }
 
@@ -239,11 +241,11 @@ static void init_swap_state(Graphics *gfx, Vulkan *vk, App *app) {
 }
 
 static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
-    gfx->sync.curr_frame_idx = CTK_U32_MAX;
-    gfx->sync.frames = ctk_create_array<Frame>(app->mem.fixed, frame_count);
+    gfx->sync.curr_frame_idx = U32_MAX;
+    gfx->sync.frames = create_array<Frame>(app->mem.fixed, frame_count);
 
     for (u32 i = 0; i < frame_count; ++i) {
-        ctk_push(gfx->sync.frames, {
+        push(gfx->sync.frames, {
             .img_aquired     = create_semaphore(vk),
             .render_finished = create_semaphore(vk),
             .in_flight       = create_fence(vk),
@@ -252,7 +254,7 @@ static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
 }
 
 static Graphics *create_graphics(App *app, Vulkan *vk) {
-    Graphics *gfx = ctk_alloc<Graphics>(app->mem.fixed, 1);
+    Graphics *gfx = allocate<Graphics>(app->mem.fixed, 1);
     create_buffers(gfx, vk);
     allocate_regions(gfx, vk);
     create_render_passes(gfx, vk, app);
@@ -263,13 +265,13 @@ static Graphics *create_graphics(App *app, Vulkan *vk) {
     init_swap_state(gfx, vk, app);
     init_sync(gfx, app, vk, 1);
     alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1, &gfx->temp_cmd_buf);
-    gfx->meshes = ctk_create_array<Mesh>(app->mem.fixed, 64);
+    gfx->meshes = create_array<Mesh>(app->mem.fixed, 64);
 
     return gfx;
 }
 
-static void push_mesh(Graphics *gfx, Vulkan *vk, CTK_Array<CTK_Vec3<f32>> *vertexes, CTK_Array<u32> *indexes) {
-    Mesh *mesh = ctk_push(gfx->meshes, {
+static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vec3<f32>> *vertexes, Array<u32> *indexes) {
+    Mesh *mesh = push(gfx->meshes, {
         .vertexes      = vertexes,
         .indexes       = indexes,
         .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 64),
@@ -288,15 +290,15 @@ static void push_mesh(Graphics *gfx, Vulkan *vk, CTK_Array<CTK_Vec3<f32>> *verte
 
 static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
     {
-        auto vertexes = ctk_create_array<CTK_Vec3<f32>>(app->mem.fixed, 64);
-        ctk_push(vertexes, { -0.4f,  0.4f, 0 });
-        ctk_push(vertexes, {  0,    -0.4f, 0 });
-        ctk_push(vertexes, {  0.4f,  0.4f, 0 });
+        auto vertexes = create_array<Vec3<f32>>(app->mem.fixed, 64);
+        push(vertexes, { -0.4f,  0.4f, 0 });
+        push(vertexes, {  0,    -0.4f, 0 });
+        push(vertexes, {  0.4f,  0.4f, 0 });
 
-        auto indexes = ctk_create_array<u32>(app->mem.fixed, 3);
-        ctk_push(indexes, 0u);
-        ctk_push(indexes, 1u);
-        ctk_push(indexes, 2u);
+        auto indexes = create_array<u32>(app->mem.fixed, 3);
+        push(indexes, 0u);
+        push(indexes, 1u);
+        push(indexes, 2u);
 
         push_mesh(gfx, vk, vertexes, indexes);
     }
@@ -308,7 +310,7 @@ static void next_frame(Graphics *gfx, Vulkan *vk) {
         gfx->sync.curr_frame_idx = 0;
 
     gfx->sync.frame = gfx->sync.frames->data + gfx->sync.curr_frame_idx;
-    validate_result(vkWaitForFences(vk->device, 1, &gfx->sync.frame->in_flight, VK_TRUE, CTK_U64_MAX),
+    validate_result(vkWaitForFences(vk->device, 1, &gfx->sync.frame->in_flight, VK_TRUE, U64_MAX),
                     "vkWaitForFences failed");
     validate_result(vkResetFences(vk->device, 1, &gfx->sync.frame->in_flight), "vkResetFences failed");
 
@@ -385,12 +387,12 @@ static void present(Graphics *gfx, Vulkan *vk) {
 
 s32 main() {
     // Create App.
-    CTK_Allocator *fixed_mem = ctk_create_stack_allocator(1 * CTK_GIGABYTE);
-    auto app = ctk_alloc<App>(fixed_mem, 1);
+    Allocator *fixed_mem = create_stack_allocator(gigabyte());
+    auto app = allocate<App>(fixed_mem, 1);
     app->mem.fixed    = fixed_mem;
-    app->mem.temp     = ctk_create_stack_allocator(app->mem.fixed, CTK_MEGABYTE);
-    app->mem.platform = ctk_create_stack_allocator(app->mem.fixed, 2 * CTK_KILOBYTE);
-    app->mem.vulkan   = ctk_create_stack_allocator(app->mem.fixed, 4 * CTK_MEGABYTE);
+    app->mem.temp     = create_stack_allocator(app->mem.fixed, megabyte());
+    app->mem.platform = create_stack_allocator(app->mem.fixed, kilobyte(2));
+    app->mem.vulkan   = create_stack_allocator(app->mem.fixed, megabyte(4));
 
     // Create Modules
     Platform *platform = create_platform(app->mem.platform, {
@@ -420,7 +422,7 @@ s32 main() {
     while (platform->window->open) {
         // Input
         process_events(platform->window);
-        if (key_down(platform, INPUT_KEY_ESCAPE))
+        if (key_down(platform, InputKey::ESCAPE))
             break;
 
         // Rendering
