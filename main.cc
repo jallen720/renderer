@@ -26,9 +26,9 @@ struct Frame {
 
 struct Mesh {
     Array<Vec3<f32>> *vertexes;
-    Array<u32> *indexes;
-    Region *vertex_region;
-    Region *index_region;
+    Array<u32>       *indexes;
+    Region           *vertex_region;
+    Region           *index_region;
 };
 
 struct Graphics {

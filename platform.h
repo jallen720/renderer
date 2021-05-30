@@ -5,13 +5,14 @@
 #include "ctk/ctk.h"
 #include "ctk/memory.h"
 #include "ctk/containers.h"
-#include "renderer/inputs.h"
 
 using namespace ctk;
 
 ////////////////////////////////////////////////////////////
 /// Data
 ////////////////////////////////////////////////////////////
+#include "renderer/inputs.h"
+
 struct WindowInfo {
     struct {
         s32 x;

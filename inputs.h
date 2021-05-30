@@ -1,5 +1,3 @@
-#pragma once
-
 enum struct InputKey {
     NUM_0,
     NUM_1,
