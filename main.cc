@@ -37,12 +37,7 @@ struct Graphics {
         Buffer *device;
     } buffer;
 
-    struct {
-        Region *staging;
-        Region *vertexes;
-        Region *indexes;
-    } region;
-
+    Region *staging_region;
     RenderPass *main_render_pass;
 
     struct {
@@ -104,12 +99,6 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static void allocate_regions(Graphics *gfx, Vulkan *vk) {
-    gfx->region.staging  = allocate_region(vk, gfx->buffer.host, megabyte(64));
-    gfx->region.vertexes = allocate_region(vk, gfx->buffer.host, megabyte(1), 64);
-    gfx->region.indexes  = allocate_region(vk, gfx->buffer.host, megabyte(1), 64);
-}
-
 static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info) {
     if (info->attachment.descriptions->count == info->attachment.descriptions->size)
         CTK_FATAL("cannot push any more attachments to RenderPassInfo");
@@ -150,7 +139,7 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
                 .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 
                 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                .finalLayout   = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             },
             .clear_value = { 0, 0, 0, 1 },
         });
@@ -188,8 +177,6 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
         },
         .max_descriptor_sets = 64,
     });
-
-
 }
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
@@ -258,7 +245,7 @@ static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
 static Graphics *create_graphics(App *app, Vulkan *vk) {
     Graphics *gfx = allocate<Graphics>(app->mem.fixed, 1);
     create_buffers(gfx, vk);
-    allocate_regions(gfx, vk);
+    gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64));
     create_render_passes(gfx, vk, app);
     create_shaders(gfx, vk);
     create_descriptor_sets(gfx, vk);
@@ -276,12 +263,10 @@ static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vec3<f32>> *vertexes, Arr
     Mesh *mesh = push(gfx->meshes, {
         .vertexes = vertexes,
         .indexes  = indexes,
-        .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 64),
-        .index_region  = allocate_region(vk, gfx->buffer.device, byte_count(indexes),  64),
+        .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes)),
+        .index_region  = allocate_region(vk, gfx->buffer.device, byte_count(indexes)),
     });
 
-    // write_to_host_region(vk, mesh->vertex_region, mesh->vertexes->data, byte_count(mesh->vertexes));
-    // write_to_host_region(vk, mesh->index_region,  mesh->indexes->data,  byte_count(mesh->indexes));
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, mesh->vertex_region, gfx->region.staging, gfx->temp_cmd_buf,
                                mesh->vertexes->data, byte_count(mesh->vertexes));
@@ -340,11 +325,12 @@ static void render(Graphics *gfx, Vulkan *vk) {
     };
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->handle);
-    Mesh *mesh = gfx->meshes->data + 0;
-    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
-    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
+        vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->handle);
+        Mesh *mesh = gfx->meshes->data + 0;
+        vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
+        vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
+                             VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd_buf);
 
