@@ -21,14 +21,14 @@ struct ShaderGroup {
 struct Frame {
     VkSemaphore img_aquired;
     VkSemaphore render_finished;
-    VkFence     in_flight;
+    VkFence in_flight;
 };
 
 struct Mesh {
     Array<Vec3<f32>> *vertexes;
-    Array<u32>       *indexes;
-    Region           *vertex_region;
-    Region           *index_region;
+    Array<u32> *indexes;
+    Region *vertex_region;
+    Region *index_region;
 };
 
 struct Graphics {
@@ -62,7 +62,7 @@ struct Graphics {
     } pipeline;
 
     struct {
-        Array<VkFramebuffer> *framebufs;
+        Array<VkFramebuffer>   *framebufs;
         Array<VkCommandBuffer> *render_cmd_bufs;
     } swap_state;
 
@@ -106,8 +106,8 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
 
 static void allocate_regions(Graphics *gfx, Vulkan *vk) {
     gfx->region.staging  = allocate_region(vk, gfx->buffer.host, megabyte(64));
-    gfx->region.vertexes = allocate_region(vk, gfx->buffer.host, megabyte(), 64);
-    gfx->region.indexes  = allocate_region(vk, gfx->buffer.host, megabyte(), 64);
+    gfx->region.vertexes = allocate_region(vk, gfx->buffer.host, megabyte(1), 64);
+    gfx->region.indexes  = allocate_region(vk, gfx->buffer.host, megabyte(1), 64);
 }
 
 static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info) {
@@ -132,7 +132,7 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
                 .clear_values = create_array<VkClearValue>(app->mem.temp, 1),
             },
             .subpass = {
-                .infos = create_array<SubpassInfo>(app->mem.temp, 1),
+                .infos        = create_array<SubpassInfo>(app->mem.temp, 1),
                 .dependencies = create_array<VkSubpassDependency>(app->mem.temp, 1),
             },
         };
@@ -140,15 +140,17 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
         // Swapchain Image Attachment
         u32 swapchain_attachment_index = push_attachment(&info, {
             .description = {
-                .flags          = 0,
-                .format         = vk->swapchain.image_format,
-                .samples        = VK_SAMPLE_COUNT_1_BIT,
+                .flags = 0,
+                .format = vk->swapchain.image_format,
+                .samples = VK_SAMPLE_COUNT_1_BIT,
+
                 .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
                 .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
                 .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                 .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-                .finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+
+                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             },
             .clear_value = { 0, 0, 0, 1 },
         });
@@ -158,7 +160,7 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
         subpass_info->color_attachment_references = create_array<VkAttachmentReference>(app->mem.temp, 1);
         push(subpass_info->color_attachment_references, {
             .attachment = swapchain_attachment_index,
-            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
 
         gfx->main_render_pass = create_render_pass(vk, &info);
@@ -182,7 +184,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
             .uniform_buffer = 4,
             // .uniform_buffer_dynamic = 0,
             // .combined_image_sampler = 0,
-            // .input_attachment = 0,
+            // .input_attachment       = 0,
         },
         .max_descriptor_sets = 64,
     });
@@ -200,10 +202,10 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
         push(&info.shaders, gfx->shader.triangle.vert);
         push(&info.shaders, gfx->shader.triangle.frag);
         push(&info.viewports, {
-            .x        = 0,
-            .y        = 0,
-            .width    = (f32)surface_extent.width,
-            .height   = (f32)surface_extent.height,
+            .x = 0,
+            .y = 0,
+            .width  = (f32)surface_extent.width,
+            .height = (f32)surface_extent.height,
             .minDepth = 1,
             .maxDepth = 0,
         });
@@ -226,8 +228,8 @@ static void init_swap_state(Graphics *gfx, Vulkan *vk, App *app) {
 
             FramebufferInfo info = {
                 .attachments = create_array<VkImageView>(app->mem.temp, 1),
-                .extent      = get_surface_extent(vk),
-                .layers      = 1,
+                .extent = get_surface_extent(vk),
+                .layers = 1,
             };
 
             push(info.attachments, vk->swapchain.image_views[i]);
@@ -272,8 +274,8 @@ static Graphics *create_graphics(App *app, Vulkan *vk) {
 
 static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vec3<f32>> *vertexes, Array<u32> *indexes) {
     Mesh *mesh = push(gfx->meshes, {
-        .vertexes      = vertexes,
-        .indexes       = indexes,
+        .vertexes = vertexes,
+        .indexes  = indexes,
         .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 64),
         .index_region  = allocate_region(vk, gfx->buffer.device, byte_count(indexes),  64),
     });
@@ -327,9 +329,9 @@ static void render(Graphics *gfx, Vulkan *vk) {
     validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info), "failed to begin recording command buffer");
 
     VkRenderPassBeginInfo rp_begin_info = {};
-    rp_begin_info.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_begin_info.renderPass      = gfx->main_render_pass->handle;
-    rp_begin_info.framebuffer     = gfx->swap_state.framebufs->data[gfx->sync.swap_img_idx];
+    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin_info.renderPass = gfx->main_render_pass->handle;
+    rp_begin_info.framebuffer = gfx->swap_state.framebufs->data[gfx->sync.swap_img_idx];
     rp_begin_info.clearValueCount = gfx->main_render_pass->attachment_clear_values->count;
     rp_begin_info.pClearValues    = gfx->main_render_pass->attachment_clear_values->data;
     rp_begin_info.renderArea = {
@@ -357,11 +359,11 @@ static void present(Graphics *gfx, Vulkan *vk) {
         VkSubmitInfo submit_info = {};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = NULL;
-        submit_info.waitSemaphoreCount   = 1;
-        submit_info.pWaitSemaphores      = &gfx->sync.frame->img_aquired;
-        submit_info.pWaitDstStageMask    = &wait_stage;
-        submit_info.commandBufferCount   = 1;
-        submit_info.pCommandBuffers      = &gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
+        submit_info.waitSemaphoreCount = 1;
+        submit_info.pWaitSemaphores    = &gfx->sync.frame->img_aquired;
+        submit_info.pWaitDstStageMask  = &wait_stage;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers    = &gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores    = &gfx->sync.frame->render_finished;
 
@@ -376,10 +378,10 @@ static void present(Graphics *gfx, Vulkan *vk) {
         present_info.pNext = NULL;
         present_info.waitSemaphoreCount = 1;
         present_info.pWaitSemaphores    = &gfx->sync.frame->render_finished;
-        present_info.swapchainCount     = 1;
-        present_info.pSwapchains        = &vk->swapchain.handle;
-        present_info.pImageIndices      = &gfx->sync.swap_img_idx;
-        present_info.pResults           = NULL;
+        present_info.swapchainCount = 1;
+        present_info.pSwapchains    = &vk->swapchain.handle;
+        present_info.pImageIndices  = &gfx->sync.swap_img_idx;
+        present_info.pResults = NULL;
 
         validate_result(vkQueuePresentKHR(vk->queue.present, &present_info), "vkQueuePresentKHR failed");
     }
@@ -387,10 +389,10 @@ static void present(Graphics *gfx, Vulkan *vk) {
 
 s32 main() {
     // Create App.
-    Allocator *fixed_mem = create_stack_allocator(gigabyte());
+    Allocator *fixed_mem = create_stack_allocator(gigabyte(1));
     auto app = allocate<App>(fixed_mem, 1);
-    app->mem.fixed    = fixed_mem;
-    app->mem.temp     = create_stack_allocator(app->mem.fixed, megabyte());
+    app->mem.fixed = fixed_mem;
+    app->mem.temp     = create_stack_allocator(app->mem.fixed, megabyte(1));
     app->mem.platform = create_stack_allocator(app->mem.fixed, kilobyte(2));
     app->mem.vulkan   = create_stack_allocator(app->mem.fixed, megabyte(4));
 
