@@ -245,7 +245,7 @@ static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
 static Graphics *create_graphics(App *app, Vulkan *vk) {
     Graphics *gfx = allocate<Graphics>(app->mem.fixed, 1);
     create_buffers(gfx, vk);
-    gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64));
+    gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64), 16);
     create_render_passes(gfx, vk, app);
     create_shaders(gfx, vk);
     create_descriptor_sets(gfx, vk);
@@ -263,14 +263,19 @@ static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vec3<f32>> *vertexes, Arr
     Mesh *mesh = push(gfx->meshes, {
         .vertexes = vertexes,
         .indexes  = indexes,
-        .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes)),
-        .index_region  = allocate_region(vk, gfx->buffer.device, byte_count(indexes)),
+        .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 16),
+        .index_region  = allocate_region(vk, gfx->buffer.device, byte_count(indexes), 16),
     });
 
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
-        write_to_device_region(vk, mesh->vertex_region, gfx->region.staging, gfx->temp_cmd_buf,
-                               mesh->vertexes->data, byte_count(mesh->vertexes));
-        write_to_device_region(vk, mesh->index_region, gfx->region.staging, gfx->temp_cmd_buf,
+        u32 vertex_data_size = byte_count(mesh->vertexes);
+        write_to_device_region(vk, gfx->temp_cmd_buf,
+                               gfx->staging_region, 0,
+                               mesh->vertex_region, 0,
+                               mesh->vertexes->data, vertex_data_size);
+        write_to_device_region(vk, gfx->temp_cmd_buf,
+                               gfx->staging_region, vertex_data_size,
+                               mesh->index_region,  0,
                                mesh->indexes->data, byte_count(mesh->indexes));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }

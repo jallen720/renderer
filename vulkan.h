@@ -687,7 +687,7 @@ static Buffer *create_buffer(Vulkan *vk, BufferInfo *buffer_info) {
     return buffer;
 }
 
-static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSize align = 16) {
+static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSize align) {
     VkDeviceSize align_offset = buffer->end % align;
 
     auto region = allocate(vk->pool.region);
@@ -705,22 +705,24 @@ static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSiz
     return region;
 }
 
-static void write_to_host_region(Vulkan *vk, Region *region, void *data, u32 size) {
+static void write_to_host_region(Vulkan *vk, Region *region, u32 offset, void *data, u32 size) {
     CTK_ASSERT(size <= region->size);
     void *mapped_mem = NULL;
-    vkMapMemory(vk->device, region->buffer->mem, region->offset, size, 0, &mapped_mem);
+    vkMapMemory(vk->device, region->buffer->mem, region->offset + offset, size, 0, &mapped_mem);
     memcpy(mapped_mem, data, size);
     vkUnmapMemory(vk->device, region->buffer->mem);
 }
 
-static void write_to_device_region(Vulkan *vk, Region *region, Region *staging_region, VkCommandBuffer cmd_buf,
+static void write_to_device_region(Vulkan *vk, VkCommandBuffer cmd_buf,
+                                   Region *staging_region, u32 staging_offset,
+                                   Region *region,         u32 offset,
                                    void *data, u32 size)
 {
-    write_to_host_region(vk, staging_region, data, size);
+    write_to_host_region(vk, staging_region, staging_offset, data, size);
 
     VkBufferCopy copy = {};
-    copy.srcOffset = staging_region->offset;
-    copy.dstOffset = region->offset;
+    copy.srcOffset = staging_region->offset + staging_offset;
+    copy.dstOffset = region->offset         + offset;
     copy.size = size;
 
     vkCmdCopyBuffer(cmd_buf, staging_region->buffer->handle, region->buffer->handle, 1, &copy);
