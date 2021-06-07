@@ -36,12 +36,12 @@ struct QueueFamilyIndexes {
 };
 
 struct PhysicalDevice {
-    VkPhysicalDevice                 handle;
-    QueueFamilyIndexes               queue_family_idxs;
-    VkPhysicalDeviceFeatures         features;
-    VkPhysicalDeviceProperties       properties;
+    VkPhysicalDevice handle;
+    QueueFamilyIndexes queue_family_idxs;
+    VkPhysicalDeviceFeatures features;
+    VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties mem_properties;
-    VkFormat                         depth_image_format;
+    VkFormat depth_image_format;
 };
 
 struct Swapchain {
@@ -124,19 +124,19 @@ struct DescriptorPoolInfo {
 };
 
 struct PipelineInfo {
-    FixedArray<Shader *,                            8> shaders;
-    FixedArray<VkViewport,                          4> viewports;
-    FixedArray<VkRect2D,                            4> scissors;
+    FixedArray<Shader *, 8> shaders;
+    FixedArray<VkViewport, 4> viewports;
+    FixedArray<VkRect2D, 4> scissors;
     FixedArray<VkPipelineColorBlendAttachmentState, 4> color_blend_attachments;
 
     Array<VkDescriptorSetLayout> *descriptor_set_layouts;
     Array<VkPushConstantRange> *push_constant_ranges;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly;
-    VkPipelineDepthStencilStateCreateInfo  depth_stencil;
+    VkPipelineDepthStencilStateCreateInfo depth_stencil;
     VkPipelineRasterizationStateCreateInfo rasterization;
-    VkPipelineMultisampleStateCreateInfo   multisample;
-    VkPipelineColorBlendStateCreateInfo    color_blend;
+    VkPipelineMultisampleStateCreateInfo multisample;
+    VkPipelineColorBlendStateCreateInfo color_blend;
 };
 
 struct Pipeline {
@@ -160,11 +160,11 @@ struct Vulkan {
     } mem;
 
     struct {
-        Pool<Buffer>     *buffer;
-        Pool<Region>     *region;
+        Pool<Buffer> *buffer;
+        Pool<Region> *region;
         Pool<RenderPass> *render_pass;
-        Pool<Shader>     *shader;
-        Pool<Pipeline>   *pipeline;
+        Pool<Shader> *shader;
+        Pool<Pipeline> *pipeline;
     } pool;
 
     // State
@@ -293,9 +293,9 @@ static void init_instance(Vulkan *vk) {
     info.pNext = &debug_messenger_info;
     info.flags = 0;
     info.pApplicationInfo = &app_info;
-    info.enabledLayerCount   = CTK_ARRAY_SIZE(layers);
+    info.enabledLayerCount = CTK_ARRAY_SIZE(layers);
     info.ppEnabledLayerNames = layers;
-    info.enabledExtensionCount   = CTK_ARRAY_SIZE(extensions);
+    info.enabledExtensionCount = CTK_ARRAY_SIZE(extensions);
     info.ppEnabledExtensionNames = extensions;
     validate_result(vkCreateInstance(&info, NULL, &instance->handle), "failed to create Vulkan instance");
 
@@ -449,10 +449,10 @@ static void init_device(Vulkan *vk, Array<PhysicalDeviceFeature> *requested_feat
     logical_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     logical_device_info.flags = 0;
     logical_device_info.queueCreateInfoCount = queue_infos.count;
-    logical_device_info.pQueueCreateInfos    = queue_infos.data;
-    logical_device_info.enabledLayerCount   = 0;
+    logical_device_info.pQueueCreateInfos = queue_infos.data;
+    logical_device_info.enabledLayerCount = 0;
     logical_device_info.ppEnabledLayerNames = NULL;
-    logical_device_info.enabledExtensionCount   = CTK_ARRAY_SIZE(extensions);
+    logical_device_info.enabledExtensionCount = CTK_ARRAY_SIZE(extensions);
     logical_device_info.ppEnabledExtensionNames = extensions;
 
     logical_device_info.pEnabledFeatures = (VkPhysicalDeviceFeatures *)enabled_features;
@@ -565,12 +565,12 @@ static void init_swapchain(Vulkan *vk) {
     if (graphics_queue_family_idx != present_queue_family_idx) {
         info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         info.queueFamilyIndexCount = CTK_ARRAY_SIZE(queue_family_idxs);
-        info.pQueueFamilyIndices   = queue_family_idxs;
+        info.pQueueFamilyIndices = queue_family_idxs;
     }
     else {
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.queueFamilyIndexCount = 0;
-        info.pQueueFamilyIndices   = NULL;
+        info.pQueueFamilyIndices = NULL;
     }
     validate_result(vkCreateSwapchainKHR(vk->device, &info, NULL, &vk->swapchain.handle), "failed to create swapchain");
 
@@ -598,11 +598,11 @@ static void init_swapchain(Vulkan *vk) {
         view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
         view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_info.subresourceRange.baseMipLevel   = 0;
-        view_info.subresourceRange.levelCount     = 1;
+        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.baseMipLevel = 0;
+        view_info.subresourceRange.levelCount = 1;
         view_info.subresourceRange.baseArrayLayer = 0;
-        view_info.subresourceRange.layerCount     = 1;
+        view_info.subresourceRange.layerCount = 1;
         validate_result(vkCreateImageView(vk->device, &view_info, NULL, vk->swapchain.image_views.data + i),
                         "failed to create image view");
     }
@@ -624,11 +624,11 @@ static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanIn
     auto vk = allocate<Vulkan>(module_mem, 1);
     vk->mem.module = module_mem;
     vk->mem.temp = create_stack_allocator(module_mem, megabyte(1));
-    vk->pool.buffer      = create_pool<Buffer>    (vk->mem.module, info.max_buffers);
-    vk->pool.region      = create_pool<Region>    (vk->mem.module, info.max_regions);
+    vk->pool.buffer = create_pool<Buffer>(vk->mem.module, info.max_buffers);
+    vk->pool.region = create_pool<Region>(vk->mem.module, info.max_regions);
     vk->pool.render_pass = create_pool<RenderPass>(vk->mem.module, info.max_render_passes);
-    vk->pool.shader      = create_pool<Shader>    (vk->mem.module, info.max_shaders);
-    vk->pool.pipeline    = create_pool<Pipeline>  (vk->mem.module, info.max_pipelines);
+    vk->pool.shader = create_pool<Shader>(vk->mem.module, info.max_shaders);
+    vk->pool.pipeline = create_pool<Pipeline>(vk->mem.module, info.max_pipelines);
 
     push_frame(vk->mem.temp);
 
@@ -715,14 +715,14 @@ static void write_to_host_region(Vulkan *vk, Region *region, u32 offset, void *d
 
 static void write_to_device_region(Vulkan *vk, VkCommandBuffer cmd_buf,
                                    Region *staging_region, u32 staging_offset,
-                                   Region *region,         u32 offset,
+                                   Region *region, u32 offset,
                                    void *data, u32 size)
 {
     write_to_host_region(vk, staging_region, staging_offset, data, size);
 
     VkBufferCopy copy = {};
     copy.srcOffset = staging_region->offset + staging_offset;
-    copy.dstOffset = region->offset         + offset;
+    copy.dstOffset = region->offset + offset;
     copy.size = size;
 
     vkCmdCopyBuffer(cmd_buf, staging_region->buffer->handle, region->buffer->handle, 1, &copy);
@@ -771,11 +771,11 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
     VkRenderPassCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     create_info.attachmentCount = info->attachment.descriptions->count;
-    create_info.pAttachments    = info->attachment.descriptions->data;
+    create_info.pAttachments = info->attachment.descriptions->data;
     create_info.subpassCount = subpass_descriptions->count;
-    create_info.pSubpasses   = subpass_descriptions->data;
+    create_info.pSubpasses = subpass_descriptions->data;
     create_info.dependencyCount = info->subpass.dependencies->count;
-    create_info.pDependencies   = info->subpass.dependencies->data;
+    create_info.pDependencies = info->subpass.dependencies->data;
     validate_result(vkCreateRenderPass(vk->device, &create_info, NULL, &render_pass->handle),
                     "failed to create render pass");
 
@@ -838,7 +838,7 @@ static VkDescriptorPool create_descriptor_pool(Vulkan *vk, DescriptorPoolInfo in
     pool_info.flags = 0;
     pool_info.maxSets = info.max_descriptor_sets;
     pool_info.poolSizeCount = pool_sizes.count;
-    pool_info.pPoolSizes    = pool_sizes.data;
+    pool_info.pPoolSizes = pool_sizes.data;
     VkDescriptorPool pool = VK_NULL_HANDLE;
     validate_result(vkCreateDescriptorPool(vk->device, &pool_info, NULL, &pool), "failed to create descriptor pool");
 
@@ -860,6 +860,28 @@ create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bind
 static VkDescriptorSetLayout
 create_descriptor_set_layout(VkDevice device, Array<VkDescriptorSetLayoutBinding> *bindings) {
     return create_descriptor_set_layout(device, bindings->data, bindings->count);
+}
+
+static Array<VkDescriptorSet> *allocate_descriptor_sets(Vulkan *vk, VkDescriptorPool pool,
+                                                        VkDescriptorSetLayout layout, u32 instance_count)
+{
+    push_frame(vk->mem.temp);
+
+    auto sets = create_array_full<VkDescriptorSet>(vk->mem.module, instance_count);
+    auto layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, instance_count);
+    CTK_REPEAT(instance_count) {
+        push(layouts, layout);
+    }
+
+    VkDescriptorSetAllocateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    info.descriptorPool = pool;
+    info.descriptorSetCount = layouts->count;
+    info.pSetLayouts = layouts->data;
+    validate_result(vkAllocateDescriptorSets(vk->device, &info, sets->data), "failed to allocate descriptor sets");
+
+    pop_frame(vk->mem.temp);
+    return sets;
 }
 
 static constexpr PipelineInfo DEFAULT_PIPELINE_INFO = {
@@ -929,14 +951,14 @@ static constexpr PipelineInfo DEFAULT_PIPELINE_INFO = {
 };
 
 static constexpr VkPipelineColorBlendAttachmentState DEFAULT_COLOR_BLEND_ATTACHMENT = {
-    .blendEnable         = VK_FALSE,
+    .blendEnable = VK_FALSE,
     .srcColorBlendFactor = VK_BLEND_FACTOR_ZERO,
     .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
-    .colorBlendOp        = VK_BLEND_OP_ADD,
+    .colorBlendOp = VK_BLEND_OP_ADD,
     .srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
     .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-    .alphaBlendOp        = VK_BLEND_OP_ADD,
-    .colorWriteMask      = COLOR_COMPONENT_RGBA,
+    .alphaBlendOp = VK_BLEND_OP_ADD,
+    .colorWriteMask = COLOR_COMPONENT_RGBA,
 };
 
 static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpass, PipelineInfo *info) {
@@ -1004,9 +1026,9 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     VkPipelineVertexInputStateCreateInfo vertex_input = {};
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertex_input.vertexBindingDescriptionCount = CTK_ARRAY_SIZE(vert_input_binding_descs);
-    vertex_input.pVertexBindingDescriptions    = vert_input_binding_descs;
+    vertex_input.pVertexBindingDescriptions = vert_input_binding_descs;
     vertex_input.vertexAttributeDescriptionCount = CTK_ARRAY_SIZE(vert_attrib_descs);
-    vertex_input.pVertexAttributeDescriptions    = vert_attrib_descs;
+    vertex_input.pVertexAttributeDescriptions = vert_attrib_descs;
 
     // // Viewport State
     // VkPipelineViewportStateCreateInfo viewport_state = {};
@@ -1042,9 +1064,9 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     VkPipelineViewportStateCreateInfo viewport = {};
     viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewport.viewportCount = info->viewports.count;
-    viewport.pViewports    = info->viewports.data;
+    viewport.pViewports = info->viewports.data;
     viewport.scissorCount = info->scissors.count;
-    viewport.pScissors    = info->scissors.data;
+    viewport.pScissors = info->scissors.data;
 
     // Reference attachment array in color_blend struct.
     info->color_blend.attachmentCount = info->color_blend_attachments.count;
@@ -1082,13 +1104,13 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
     return pipeline;
 }
 
-static VkFramebuffer create_framebuf(VkDevice device, VkRenderPass rp, FramebufferInfo *info) {
+static VkFramebuffer create_framebuffer(VkDevice device, VkRenderPass rp, FramebufferInfo *info) {
     VkFramebufferCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     create_info.renderPass = rp;
     create_info.attachmentCount = info->attachments->count;
-    create_info.pAttachments    = info->attachments->data;
-    create_info.width  = info->extent.width;
+    create_info.pAttachments = info->attachments->data;
+    create_info.width = info->extent.width;
     create_info.height = info->extent.height;
     create_info.layers = info->layers;
     VkFramebuffer fb = VK_NULL_HANDLE;
