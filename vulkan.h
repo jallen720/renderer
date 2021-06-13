@@ -38,8 +38,11 @@ struct QueueFamilyIndexes {
 struct PhysicalDevice {
     VkPhysicalDevice handle;
     QueueFamilyIndexes queue_family_idxs;
+
+    VkPhysicalDeviceType type;
+    u32 min_uniform_buffer_region_align;
+
     VkPhysicalDeviceFeatures features;
-    VkPhysicalDeviceProperties properties;
     VkPhysicalDeviceMemoryProperties mem_properties;
     VkFormat depth_image_format;
 };
@@ -406,8 +409,14 @@ static void load_physical_device(Vulkan *vk, PhysicalDeviceFeature *requested_fe
         physical_device->handle = vk_physical_device;
         physical_device->queue_family_idxs = find_queue_family_idxs(vk, vk_physical_device);
 
+        // Load properties for future reference.
+        VkPhysicalDeviceProperties properties = {};
+        vkGetPhysicalDeviceProperties(vk_physical_device, &properties);
+        physical_device->type = properties.deviceType;
+        physical_device->min_uniform_buffer_region_align = properties.limits.minUniformBufferOffsetAlignment;
+
+
         vkGetPhysicalDeviceFeatures(vk_physical_device, &physical_device->features);
-        vkGetPhysicalDeviceProperties(vk_physical_device, &physical_device->properties);
         vkGetPhysicalDeviceMemoryProperties(vk_physical_device, &physical_device->mem_properties);
         physical_device->depth_image_format = find_depth_image_format(physical_device->handle);
     }
@@ -419,9 +428,9 @@ static void load_physical_device(Vulkan *vk, PhysicalDeviceFeature *requested_fe
     for (u32 i = 0; i < physical_devices->count; ++i) {
         PhysicalDevice *physical_device = physical_devices->data + i;
 
-        if (physical_device->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        if (physical_device->type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             push(discrete_devices, physical_device);
-        else if (physical_device->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+        else if (physical_device->type == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
             push(integrated_devices, physical_device);
     }
 
@@ -709,6 +718,10 @@ static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSiz
     buffer->end = region->offset + region->size;
 
     return region;
+}
+
+static Region *allocate_uniform_buffer_region(Vulkan *vk, Buffer *buffer, u32 size) {
+    return allocate_region(vk, buffer, size, vk->physical_device.min_uniform_buffer_region_align);
 }
 
 static void write_to_host_region(Vulkan *vk, Region *region, u32 offset, void *data, u32 size) {

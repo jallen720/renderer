@@ -191,7 +191,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
 
         gfx->descriptor_region.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
         for (u32 i = 0; i < vk->swapchain.image_count; ++i)
-            gfx->descriptor_region.color->data[i] = allocate_region(vk, gfx->buffer.device, 16, 16);
+            gfx->descriptor_region.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
 
         DescriptorInfo descriptor_infos[] = {
             {
