@@ -123,6 +123,12 @@ struct DescriptorPoolInfo {
     u32 max_descriptor_sets;
 };
 
+struct DescriptorInfo {
+    VkDescriptorType type;
+    u32 count;
+    VkShaderStageFlags stage;
+};
+
 struct PipelineInfo {
     FixedArray<Shader *, 8> shaders;
     FixedArray<VkViewport, 4> viewports;
@@ -319,7 +325,8 @@ static QueueFamilyIndexes find_queue_family_idxs(Vulkan *vk, VkPhysicalDevice ph
 
     QueueFamilyIndexes queue_family_idxs = { .graphics = U32_MAX, .present = U32_MAX };
     auto queue_family_props_array =
-        load_vk_objects<VkQueueFamilyProperties>(vk->mem.temp, vkGetPhysicalDeviceQueueFamilyProperties, physical_device);
+        load_vk_objects<VkQueueFamilyProperties>(vk->mem.temp, vkGetPhysicalDeviceQueueFamilyProperties,
+                                                 physical_device);
 
     for (u32 queue_family_idx = 0; queue_family_idx < queue_family_props_array->count; ++queue_family_idx) {
         VkQueueFamilyProperties *queue_family_props = queue_family_props_array->data + queue_family_idx;
@@ -339,13 +346,14 @@ static QueueFamilyIndexes find_queue_family_idxs(Vulkan *vk, VkPhysicalDevice ph
 }
 
 static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, Array<PhysicalDevice *> *physical_devices,
-                                                     Array<PhysicalDeviceFeature> *requested_features)
+                                                     PhysicalDeviceFeature *requested_features,
+                                                     u32 requested_feature_count)
 {
     push_frame(vk->mem.temp);
 
     Array<PhysicalDeviceFeature> *unsupported_features =
         requested_features
-        ? create_array<PhysicalDeviceFeature>(vk->mem.temp, requested_features->size)
+        ? create_array<PhysicalDeviceFeature>(vk->mem.temp, requested_feature_count)
         : NULL;
 
     PhysicalDevice *suitable_device = NULL;
@@ -361,8 +369,8 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, Array<PhysicalD
             clear(unsupported_features);
 
             // Check that all requested features are supported.
-            for (u32 feat_index = 0; feat_index < requested_features->count; ++feat_index) {
-                PhysicalDeviceFeature requested_feature = requested_features->data[feat_index];
+            for (u32 feat_index = 0; feat_index < requested_feature_count; ++feat_index) {
+                PhysicalDeviceFeature requested_feature = requested_features[feat_index];
 
                 if (!physical_device_feature_supported(requested_feature, &physical_device->features))
                     push(unsupported_features, requested_feature);
@@ -383,7 +391,7 @@ static PhysicalDevice *find_suitable_physical_device(Vulkan *vk, Array<PhysicalD
     return suitable_device;
 }
 
-static void load_physical_device(Vulkan *vk, Array<PhysicalDeviceFeature> *requested_features) {
+static void load_physical_device(Vulkan *vk, PhysicalDeviceFeature *requested_features, u32 requested_feature_count) {
     push_frame(vk->mem.temp);
 
     // Load info about all physical devices.
@@ -418,10 +426,12 @@ static void load_physical_device(Vulkan *vk, Array<PhysicalDeviceFeature> *reque
     }
 
     // Find suitable discrete device, or fallback to an integrated device.
-    PhysicalDevice *suitable_device = find_suitable_physical_device(vk, discrete_devices, requested_features);
+    PhysicalDevice *suitable_device = find_suitable_physical_device(vk, discrete_devices, requested_features,
+                                                                    requested_feature_count);
 
     if (suitable_device == NULL) {
-        suitable_device = find_suitable_physical_device(vk, integrated_devices, requested_features);
+        suitable_device = find_suitable_physical_device(vk, integrated_devices, requested_features,
+                                                        requested_feature_count);
 
         if (suitable_device == NULL)
             CTK_FATAL("failed to find any suitable device");
@@ -431,7 +441,7 @@ static void load_physical_device(Vulkan *vk, Array<PhysicalDeviceFeature> *reque
     pop_frame(vk->mem.temp);
 }
 
-static void init_device(Vulkan *vk, Array<PhysicalDeviceFeature> *requested_features) {
+static void init_device(Vulkan *vk, PhysicalDeviceFeature *requested_features, u32 requested_feature_count) {
     FixedArray<VkDeviceQueueCreateInfo, 2> queue_infos = {};
     push(&queue_infos, default_queue_info(vk->physical_device.queue_family_idxs.graphics));
 
@@ -442,8 +452,8 @@ static void init_device(Vulkan *vk, Array<PhysicalDeviceFeature> *requested_feat
     cstr extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     VkBool32 enabled_features[(s32)PhysicalDeviceFeature::COUNT] = {};
 
-    for (u32 i = 0; i < requested_features->count; ++i)
-        enabled_features[(s32)requested_features->data[i]] = VK_TRUE;
+    for (u32 i = 0; i < requested_feature_count; ++i)
+        enabled_features[(s32)requested_features[i]] = VK_TRUE;
 
     VkDeviceCreateInfo logical_device_info = {};
     logical_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -630,23 +640,19 @@ static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanIn
     vk->pool.shader = create_pool<Shader>(vk->mem.module, info.max_shaders);
     vk->pool.pipeline = create_pool<Pipeline>(vk->mem.module, info.max_pipelines);
 
-    push_frame(vk->mem.temp);
-
     // Initialization
     init_instance(vk);
     init_surface(vk, platform);
 
     // Physical/Logical Devices
-    auto requested_features = create_array<PhysicalDeviceFeature>(vk->mem.temp, 2);
-    push(requested_features, PhysicalDeviceFeature::geometryShader);
-    load_physical_device(vk, requested_features);
-    init_device(vk, requested_features);
+    auto requested_feature = PhysicalDeviceFeature::geometryShader;
+    load_physical_device(vk, &requested_feature, 1);
+    init_device(vk, &requested_feature, 1);
     init_queues(vk);
 
     init_swapchain(vk);
     init_cmd_pool(vk);
 
-    pop_frame(vk->mem.temp);
     return vk;
 }
 
@@ -845,8 +851,9 @@ static VkDescriptorPool create_descriptor_pool(Vulkan *vk, DescriptorPoolInfo in
     return pool;
 }
 
-static VkDescriptorSetLayout
-create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bindings, u32 binding_count) {
+static VkDescriptorSetLayout create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bindings,
+                                                          u32 binding_count)
+{
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = binding_count;
@@ -857,32 +864,113 @@ create_descriptor_set_layout(VkDevice device, VkDescriptorSetLayoutBinding *bind
     return layout;
 }
 
-static VkDescriptorSetLayout
-create_descriptor_set_layout(VkDevice device, Array<VkDescriptorSetLayoutBinding> *bindings) {
+static VkDescriptorSetLayout create_descriptor_set_layout(VkDevice device,
+                                                          Array<VkDescriptorSetLayoutBinding> *bindings)
+{
     return create_descriptor_set_layout(device, bindings->data, bindings->count);
 }
 
-static Array<VkDescriptorSet> *allocate_descriptor_sets(Vulkan *vk, VkDescriptorPool pool,
-                                                        VkDescriptorSetLayout layout, u32 instance_count)
+static VkDescriptorSetLayout create_descriptor_set_layout(Vulkan *vk, DescriptorInfo *descriptor_infos, u32 count) {
+    push_frame(vk->mem.temp);
+
+    auto bindings = create_array<VkDescriptorSetLayoutBinding>(vk->mem.temp, count);
+    for (u32 i = 0; i < count; ++i) {
+        DescriptorInfo *info = descriptor_infos + i;
+        push(bindings, {
+            .binding = i,
+            .descriptorType = info->type,
+            .descriptorCount = info->count,
+            .stageFlags = info->stage,
+            .pImmutableSamplers = NULL,
+        });
+    }
+
+    VkDescriptorSetLayout layout = create_descriptor_set_layout(vk->device, bindings);
+
+    pop_frame(vk->mem.temp);
+    return layout;
+}
+
+static VkDescriptorSetLayout create_descriptor_set_layout(Vulkan *vk, Array<DescriptorInfo> *descriptor_infos) {
+    create_descriptor_set_layout(vk, descriptor_infos->data, descriptor_infos->count);
+}
+
+static void allocate_descriptor_sets(Vulkan *vk, VkDescriptorPool pool, VkDescriptorSetLayout layout, u32 count,
+                                     VkDescriptorSet *descriptor_sets)
 {
     push_frame(vk->mem.temp);
 
-    auto sets = create_array_full<VkDescriptorSet>(vk->mem.module, instance_count);
-    auto layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, instance_count);
-    CTK_REPEAT(instance_count) {
+    auto layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, count);
+    CTK_REPEAT(count) {
         push(layouts, layout);
     }
 
     VkDescriptorSetAllocateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     info.descriptorPool = pool;
-    info.descriptorSetCount = layouts->count;
+    info.descriptorSetCount = count;
     info.pSetLayouts = layouts->data;
-    validate_result(vkAllocateDescriptorSets(vk->device, &info, sets->data), "failed to allocate descriptor sets");
+    validate_result(vkAllocateDescriptorSets(vk->device, &info, descriptor_sets), "failed to allocate descriptor sets");
 
     pop_frame(vk->mem.temp);
-    return sets;
 }
+
+static VkDescriptorSet allocate_descriptor_set(Vulkan *vk, VkDescriptorPool pool, VkDescriptorSetLayout layout) {
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+    allocate_descriptor_sets(vk, pool, layout, 1, &descriptor_set);
+    return descriptor_set;
+};
+
+static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, u32 descriptor_count,
+                                  DescriptorInfo *descriptor_infos, Region **descriptor_regions)
+{
+    push_frame(vk->mem.temp);
+
+    auto buf_infos = create_array<VkDescriptorBufferInfo>(vk->mem.temp, descriptor_count);
+    auto img_infos = create_array<VkDescriptorImageInfo>(vk->mem.temp, descriptor_count);
+    auto writes = create_array<VkWriteDescriptorSet>(vk->mem.temp, descriptor_count);
+
+    for (u32 i = 0; i < descriptor_count; ++i) {
+        DescriptorInfo *descriptor_info = descriptor_infos + i;
+        Region *descriptor_region = descriptor_regions[i];
+
+        VkWriteDescriptorSet *write = push(writes);
+        write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write->dstSet = descriptor_set;
+        write->dstBinding = i;
+        write->dstArrayElement = 0;
+        write->descriptorCount = descriptor_info->count;
+        write->descriptorType = descriptor_info->type;
+
+        if (descriptor_info->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+            descriptor_info->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
+            descriptor_info->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        {
+            VkDescriptorBufferInfo *info = push(buf_infos);
+            info->buffer = descriptor_region->buffer->handle;
+            info->offset = descriptor_region->offset;
+            info->range = descriptor_region->size;
+            write->pBufferInfo = info;
+        }
+        else if (descriptor_info->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            // VkDescriptorImageInfo *info = push(img_infos);
+            // info->sampler = t->sampler;
+            // info->imageView = t->view;
+            // info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        }
+        else {
+            CTK_FATAL("unhandled descriptor type when updating descriptor set");
+        }
+    }
+
+    vkUpdateDescriptorSets(vk->device, writes->count, writes->data, 0, NULL);
+
+    pop_frame(vk->mem.temp);
+}
+
+// static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, Array<Descriptor *> *descriptors) {
+//     return update_descriptor_set(vk, descriptor_set, descriptors->data, descriptors->count);
+// }
 
 static constexpr PipelineInfo DEFAULT_PIPELINE_INFO = {
     .input_assembly = {

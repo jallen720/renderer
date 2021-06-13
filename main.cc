@@ -44,28 +44,26 @@ struct Graphics {
         ShaderGroup triangle;
     } shader;
 
+    VkDescriptorPool descriptor_pool;
+
     struct {
-        VkDescriptorPool pool;
+        Array<Region *> *color;
+    } descriptor_region;
 
-        struct {
-            VkDescriptorSetLayout model;
-        } layout;
+    struct {
+        VkDescriptorSetLayout color;
+    } descriptor_set_layout;
 
-        struct {
-            Array<VkDescriptorSet> *model;
-        } set;
-
-        struct {
-            Array<Region *> *model;
-        } data;
-    } descriptor;
+    struct {
+        Array<VkDescriptorSet> *color;
+    } descriptor_set;
 
     struct {
         Pipeline *direct;
     } pipeline;
 
     struct {
-        Array<VkFramebuffer>   *framebufs;
+        Array<VkFramebuffer> *framebufs;
         Array<VkCommandBuffer> *render_cmd_bufs;
     } swap_state;
 
@@ -77,7 +75,6 @@ struct Graphics {
     } sync;
 
     VkCommandBuffer temp_cmd_buf;
-
     Array<Mesh> *meshes;
 };
 
@@ -176,8 +173,9 @@ static void create_shaders(Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
+
     // Pool
-    gfx->descriptor.pool = create_descriptor_pool(vk, {
+    gfx->descriptor_pool = create_descriptor_pool(vk, {
         .descriptor_count = {
             .uniform_buffer = 4,
             // .uniform_buffer_dynamic = 0,
@@ -187,52 +185,66 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
         .max_descriptor_sets = 64,
     });
 
-    // Layouts
+    // Color
     {
-        VkDescriptorSetLayoutBinding binding = {
-            .binding = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .pImmutableSamplers = NULL,
+        push_frame(app->mem.temp);
+
+        gfx->descriptor_region.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i)
+            gfx->descriptor_region.color->data[i] = allocate_region(vk, gfx->buffer.device, 16, 16);
+
+        DescriptorInfo descriptor_infos[] = {
+            {
+                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .count = 1,
+                .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            }
         };
 
-        gfx->descriptor.layout.model = create_descriptor_set_layout(vk->device, &binding, 1);
+        gfx->descriptor_set_layout.color = create_descriptor_set_layout(vk, descriptor_infos,
+                                                                        CTK_ARRAY_SIZE(descriptor_infos));
+
+        gfx->descriptor_set.color = create_array<VkDescriptorSet>(app->mem.fixed, vk->swapchain.image_count);
+        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.color,
+                                 vk->swapchain.image_count, gfx->descriptor_set.color->data);
+
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+            Region *descriptor_regions[] = {
+                gfx->descriptor_region.color->data[i]
+            };
+
+            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(descriptor_infos),
+                                  descriptor_infos, descriptor_regions);
+        }
+
+        pop_frame(app->mem.temp);
     }
 
-    // Sets
-    gfx->descriptor.set.model = allocate_descriptor_sets(vk, gfx->descriptor.pool, gfx->descriptor.layout.model,
-                                                         vk->swapchain.image_count);
+    // // Update
+    // FixedArray<VkDescriptorBufferInfo, 32> buf_infos = {};
+    // FixedArray<VkDescriptorImageInfo, 32> img_infos = {};
+    // FixedArray<VkWriteDescriptorSet, 32> writes = {};
 
-    // Data
-    gfx->descriptor.data.model = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
-    CTK_REPEAT(vk->swapchain.image_count)
-        push(gfx->descriptor.data.model, allocate_region(vk, gfx->buffer.host, 64, 64));
+    // for (u32 i = 0; i < gfx->descriptor.data.model->count; ++i) {
+    //     Region *region = gfx->descriptor.data.model->data[i];
 
-    // Update
-    FixedArray<VkDescriptorBufferInfo, 32> buf_infos = {};
-    FixedArray<VkDescriptorImageInfo, 32> img_infos = {};
-    FixedArray<VkWriteDescriptorSet, 32> writes = {};
+    //     VkDescriptorBufferInfo *info = push(&buf_infos);
+    //     info->buffer = region->buffer->handle;
+    //     info->offset = region->offset;
+    //     info->range = region->size;
 
-    for (u32 i = 0; i < gfx->descriptor.data.model->count; ++i) {
-        Region *region = gfx->descriptor.data.model->data[i];
+    //     VkWriteDescriptorSet *write = push(&writes);
+    //     write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    //     write->dstSet = gfx->descriptor.set.model->data[i];
+    //     write->dstBinding = 0;
+    //     write->dstArrayElement = 0;
+    //     write->descriptorCount = 1;
+    //     write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    //     write->pBufferInfo = info;
+    // }
 
-        VkDescriptorBufferInfo *info = push(&buf_infos);
-        info->buffer = region->buffer->handle;
-        info->offset = region->offset;
-        info->range = region->size;
+    // vkUpdateDescriptorSets(vk->device, writes.count, writes.data, 0, NULL);
 
-        VkWriteDescriptorSet *write = push(&writes);
-        write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write->dstSet = gfx->descriptor.set.model->data[i];
-        write->dstBinding = 0;
-        write->dstArrayElement = 0;
-        write->descriptorCount = 1;
-        write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        write->pBufferInfo = info;
-    }
-
-    vkUpdateDescriptorSets(vk->device, writes.count, writes.data, 0, NULL);
 }
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
@@ -242,6 +254,8 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
         VkExtent2D surface_extent = get_surface_extent(vk);
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
+        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, 1);
+        // push(info.descriptor_set_layouts, gfx->descriptor.set.layout.color);
         push(&info.shaders, gfx->shader.triangle.vert);
         push(&info.shaders, gfx->shader.triangle.frag);
         push(&info.viewports, {
@@ -366,6 +380,10 @@ static void next_frame(Graphics *gfx, Vulkan *vk) {
     gfx->sync.swap_img_idx = next_swap_img_idx(vk, gfx->sync.frame->img_aquired, VK_NULL_HANDLE);
 }
 
+static void update_render_state(Graphics *gfx, Vulkan *vk, Vec3<f32> *color) {
+
+}
+
 static void render(Graphics *gfx, Vulkan *vk) {
     VkCommandBuffer cmd_buf = gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
@@ -385,14 +403,21 @@ static void render(Graphics *gfx, Vulkan *vk) {
         .extent = vk->swapchain.extent,
     };
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
         vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->handle);
+
+        // // Bind descriptor sets.
+        // VkDescriptorSet ds = gfx->descriptor.set.color->data[gfx->sync.swap_img_idx];
+        // vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->layout,
+        //                         0, 1, &ds,
+        //                         0, NULL);
+
+        // Bind mesh data.
         Mesh *mesh = gfx->meshes->data + 0;
         vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
         vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
                              VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
 
+        vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
     vkCmdEndRenderPass(cmd_buf);
 
     vkEndCommandBuffer(cmd_buf);
@@ -466,6 +491,7 @@ s32 main() {
 
     // Test
     create_test_data(app, gfx, vk);
+    Vec3<f32> color = {};
 
     // Main Loop
     while (platform->window->open) {
@@ -474,8 +500,13 @@ s32 main() {
         if (key_down(platform, InputKey::ESCAPE))
             break;
 
+             if (key_down(platform, InputKey::Q)) color = { 1, 0, 0 };
+        else if (key_down(platform, InputKey::W)) color = { 0, 1, 0 };
+        else if (key_down(platform, InputKey::E)) color = { 0, 0, 1 };
+
         // Rendering
         next_frame(gfx, vk);
+        update_render_state(gfx, vk, &color);
         render(gfx, vk);
         present(gfx, vk);
     }
