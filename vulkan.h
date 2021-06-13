@@ -127,17 +127,17 @@ struct DescriptorPoolInfo {
 };
 
 struct DescriptorInfo {
-    VkDescriptorType type;
     u32 count;
+    VkDescriptorType type;
     VkShaderStageFlags stage;
 };
 
 struct PipelineInfo {
     FixedArray<Shader *, 8> shaders;
-    FixedArray<VkViewport, 4> viewports;
-    FixedArray<VkRect2D, 4> scissors;
-    FixedArray<VkPipelineColorBlendAttachmentState, 4> color_blend_attachments;
+    FixedArray<VkPipelineColorBlendAttachmentState, 8> color_blend_attachments;
 
+    Array<VkViewport> *viewports;
+    Array<VkRect2D> *scissors;
     Array<VkDescriptorSetLayout> *descriptor_set_layouts;
     Array<VkPushConstantRange> *push_constant_ranges;
 
@@ -1164,10 +1164,14 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
 
     VkPipelineViewportStateCreateInfo viewport = {};
     viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport.viewportCount = info->viewports.count;
-    viewport.pViewports = info->viewports.data;
-    viewport.scissorCount = info->scissors.count;
-    viewport.pScissors = info->scissors.data;
+    if (info->viewports) {
+        viewport.viewportCount = info->viewports->count;
+        viewport.pViewports = info->viewports->data;
+    }
+    if (info->scissors) {
+        viewport.scissorCount = info->scissors->count;
+        viewport.pScissors = info->scissors->data;
+    }
 
     // Reference attachment array in color_blend struct.
     info->color_blend.attachmentCount = info->color_blend_attachments.count;

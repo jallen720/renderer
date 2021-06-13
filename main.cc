@@ -194,11 +194,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
             gfx->descriptor_region.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
 
         DescriptorInfo descriptor_infos[] = {
-            {
-                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .count = 1,
-                .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            }
+            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
         };
 
         gfx->descriptor_set_layout.color = create_descriptor_set_layout(vk, descriptor_infos,
@@ -220,31 +216,6 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
         pop_frame(app->mem.temp);
     }
 
-    // // Update
-    // FixedArray<VkDescriptorBufferInfo, 32> buf_infos = {};
-    // FixedArray<VkDescriptorImageInfo, 32> img_infos = {};
-    // FixedArray<VkWriteDescriptorSet, 32> writes = {};
-
-    // for (u32 i = 0; i < gfx->descriptor.data.model->count; ++i) {
-    //     Region *region = gfx->descriptor.data.model->data[i];
-
-    //     VkDescriptorBufferInfo *info = push(&buf_infos);
-    //     info->buffer = region->buffer->handle;
-    //     info->offset = region->offset;
-    //     info->range = region->size;
-
-    //     VkWriteDescriptorSet *write = push(&writes);
-    //     write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    //     write->dstSet = gfx->descriptor.set.model->data[i];
-    //     write->dstBinding = 0;
-    //     write->dstArrayElement = 0;
-    //     write->descriptorCount = 1;
-    //     write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    //     write->pBufferInfo = info;
-    // }
-
-    // vkUpdateDescriptorSets(vk->device, writes.count, writes.data, 0, NULL);
-
 }
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
@@ -255,10 +226,15 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
         info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, 1);
-        // push(info.descriptor_set_layouts, gfx->descriptor.set.layout.color);
+        info.viewports = create_array<VkViewport>(vk->mem.temp, 1);
+        info.scissors = create_array<VkRect2D>(vk->mem.temp, 1);
+
         push(&info.shaders, gfx->shader.triangle.vert);
         push(&info.shaders, gfx->shader.triangle.frag);
-        push(&info.viewports, {
+        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
+
+        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.color);
+        push(info.viewports, {
             .x = 0,
             .y = 0,
             .width = (f32)surface_extent.width,
@@ -266,8 +242,7 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
             .minDepth = 1,
             .maxDepth = 0,
         });
-        push(&info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
-        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
+        push(info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
 
         gfx->pipeline.direct = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
@@ -381,7 +356,12 @@ static void next_frame(Graphics *gfx, Vulkan *vk) {
 }
 
 static void update_render_state(Graphics *gfx, Vulkan *vk, Vec3<f32> *color) {
-
+    begin_temp_cmd_buf(gfx->temp_cmd_buf);
+        write_to_device_region(vk, gfx->temp_cmd_buf,
+                               gfx->staging_region, 0,
+                               gfx->descriptor_region.color->data[gfx->sync.swap_img_idx], 0,
+                               color, sizeof(*color));
+    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
 static void render(Graphics *gfx, Vulkan *vk) {
@@ -405,11 +385,14 @@ static void render(Graphics *gfx, Vulkan *vk) {
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->handle);
 
-        // // Bind descriptor sets.
-        // VkDescriptorSet ds = gfx->descriptor.set.color->data[gfx->sync.swap_img_idx];
-        // vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->layout,
-        //                         0, 1, &ds,
-        //                         0, NULL);
+        // Bind descriptor sets.
+        VkDescriptorSet descriptor_sets[] = {
+            gfx->descriptor_set.color->data[gfx->sync.swap_img_idx],
+        };
+
+        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->layout,
+                                0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
+                                0, NULL);
 
         // Bind mesh data.
         Mesh *mesh = gfx->meshes->data + 0;
