@@ -38,17 +38,25 @@ struct Graphics {
     } buffer;
 
     Region *staging_region;
-    RenderPass *main_render_pass;
 
     struct {
-        ShaderGroup triangle;
+        ShaderGroup color;
+        ShaderGroup texture;
     } shader;
+
+    struct {
+        Image *test;
+    } image;
 
     VkDescriptorPool descriptor_pool;
 
     struct {
         Array<Region *> *color;
-    } descriptor_region;
+    } descriptor_regions;
+
+    struct {
+        Array<Region *> *texture;
+    } descriptor_textures;
 
     struct {
         VkDescriptorSetLayout color;
@@ -57,6 +65,8 @@ struct Graphics {
     struct {
         Array<VkDescriptorSet> *color;
     } descriptor_set;
+
+    RenderPass *main_render_pass;
 
     struct {
         Pipeline *direct;
@@ -102,6 +112,113 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
         info.mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         gfx->buffer.device = create_buffer(vk, &info);
     }
+}
+
+static void create_shaders(Graphics *gfx, Vulkan *vk) {
+    gfx->shader = {
+        .color = {
+            .vert = create_shader(vk, "data/shaders/color.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            .frag = create_shader(vk, "data/shaders/color.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
+        },
+        .texture = {
+            .vert = create_shader(vk, "data/shaders/texture.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            .frag = create_shader(vk, "data/shaders/texture.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
+        },
+    };
+}
+
+static void create_images(Graphics *gfx, Vulkan *vk) {
+    {
+        VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
+        gfx->image.test = create_image(vk, {
+            .image = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                .flags = 0,
+                .imageType = VK_IMAGE_TYPE_2D,
+                .format = fmt,
+                .extent = {
+                    .width = 16,
+                    .height = 16,
+                    .depth = 1,
+                },
+                .mipLevels = 1,
+                .arrayLayers = 1,
+                .samples = VK_SAMPLE_COUNT_1_BIT,
+                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 0, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+                .pQueueFamilyIndices = NULL, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            .view = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .flags = 0,
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .format = fmt,
+                .components = {
+                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+                },
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            },
+            .mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        });
+    }
+}
+
+static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
+
+    // Pool
+    gfx->descriptor_pool = create_descriptor_pool(vk, {
+        .descriptor_count = {
+            .uniform_buffer = 4,
+            // .uniform_buffer_dynamic = 0,
+            // .combined_image_sampler = 0,
+            // .input_attachment = 0,
+        },
+        .max_descriptor_sets = 64,
+    });
+
+    // Color
+    {
+        push_frame(app->mem.temp);
+
+        gfx->descriptor_regions.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i)
+            gfx->descriptor_regions.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
+
+        DescriptorInfo descriptor_infos[] = {
+            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
+        };
+
+        gfx->descriptor_set_layout.color = create_descriptor_set_layout(vk, descriptor_infos,
+                                                                        CTK_ARRAY_SIZE(descriptor_infos));
+
+        gfx->descriptor_set.color = create_array<VkDescriptorSet>(app->mem.fixed, vk->swapchain.image_count);
+        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.color,
+                                 vk->swapchain.image_count, gfx->descriptor_set.color->data);
+
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+            Region *descriptor_regions[] = {
+                gfx->descriptor_regions.color->data[i]
+            };
+
+            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(descriptor_infos),
+                                  descriptor_infos, descriptor_regions);
+        }
+
+        pop_frame(app->mem.temp);
+    }
+
 }
 
 static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info) {
@@ -151,8 +268,8 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
 
         // Subpasses
         SubpassInfo *subpass_info = push(info.subpass.infos);
-        subpass_info->color_attachment_references = create_array<VkAttachmentReference>(app->mem.temp, 1);
-        push(subpass_info->color_attachment_references, {
+        subpass_info->color_attachment_refs = create_array<VkAttachmentReference>(app->mem.temp, 1);
+        push(subpass_info->color_attachment_refs, {
             .attachment = swapchain_attachment_index,
             .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
@@ -161,61 +278,6 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
 
         pop_frame(app->mem.temp);
     }
-}
-
-static void create_shaders(Graphics *gfx, Vulkan *vk) {
-    gfx->shader = {
-        .triangle = {
-            .vert = create_shader(vk, "data/shaders/triangle.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            .frag = create_shader(vk, "data/shaders/triangle.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
-        },
-    };
-}
-
-static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
-
-    // Pool
-    gfx->descriptor_pool = create_descriptor_pool(vk, {
-        .descriptor_count = {
-            .uniform_buffer = 4,
-            // .uniform_buffer_dynamic = 0,
-            // .combined_image_sampler = 0,
-            // .input_attachment = 0,
-        },
-        .max_descriptor_sets = 64,
-    });
-
-    // Color
-    {
-        push_frame(app->mem.temp);
-
-        gfx->descriptor_region.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i)
-            gfx->descriptor_region.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
-
-        DescriptorInfo descriptor_infos[] = {
-            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
-        };
-
-        gfx->descriptor_set_layout.color = create_descriptor_set_layout(vk, descriptor_infos,
-                                                                        CTK_ARRAY_SIZE(descriptor_infos));
-
-        gfx->descriptor_set.color = create_array<VkDescriptorSet>(app->mem.fixed, vk->swapchain.image_count);
-        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.color,
-                                 vk->swapchain.image_count, gfx->descriptor_set.color->data);
-
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-            Region *descriptor_regions[] = {
-                gfx->descriptor_region.color->data[i]
-            };
-
-            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(descriptor_infos),
-                                  descriptor_infos, descriptor_regions);
-        }
-
-        pop_frame(app->mem.temp);
-    }
-
 }
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
@@ -229,8 +291,8 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
         info.viewports = create_array<VkViewport>(vk->mem.temp, 1);
         info.scissors = create_array<VkRect2D>(vk->mem.temp, 1);
 
-        push(&info.shaders, gfx->shader.triangle.vert);
-        push(&info.shaders, gfx->shader.triangle.frag);
+        push(&info.shaders, gfx->shader.color.vert);
+        push(&info.shaders, gfx->shader.color.frag);
         push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
         push(info.descriptor_set_layouts, gfx->descriptor_set_layout.color);
@@ -291,9 +353,10 @@ static Graphics *create_graphics(App *app, Vulkan *vk) {
     Graphics *gfx = allocate<Graphics>(app->mem.fixed, 1);
     create_buffers(gfx, vk);
     gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64), 16);
-    create_render_passes(gfx, vk, app);
     create_shaders(gfx, vk);
+    create_images(gfx, vk);
     create_descriptor_sets(gfx, vk, app);
+    create_render_passes(gfx, vk, app);
     create_pipelines(gfx, vk, app);
 
     init_swap_state(gfx, vk, app);
@@ -359,7 +422,7 @@ static void update_render_state(Graphics *gfx, Vulkan *vk, Vec3<f32> *color) {
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, gfx->temp_cmd_buf,
                                gfx->staging_region, 0,
-                               gfx->descriptor_region.color->data[gfx->sync.swap_img_idx], 0,
+                               gfx->descriptor_regions.color->data[gfx->sync.swap_img_idx], 0,
                                color, sizeof(*color));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
@@ -465,6 +528,7 @@ s32 main() {
     Vulkan *vk = create_vulkan(app->mem.vulkan, platform, {
         .max_buffers = 2,
         .max_regions = 32,
+        .max_images = 16,
         .max_render_passes = 2,
         .max_shaders = 16,
         .max_pipelines = 8,

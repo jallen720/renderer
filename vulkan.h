@@ -75,11 +75,23 @@ struct Region {
     VkDeviceSize offset;
 };
 
+struct ImageInfo {
+    VkImageCreateInfo image;
+    VkImageViewCreateInfo view;
+    VkMemoryPropertyFlagBits mem_property_flags;
+};
+
+struct Image {
+    VkImage handle;
+    VkImageView view;
+    VkDeviceMemory mem;
+};
+
 struct SubpassInfo {
     Array<u32> *preserve_attachment_indexes;
-    Array<VkAttachmentReference> *input_attachment_references;
-    Array<VkAttachmentReference> *color_attachment_references;
-    VkAttachmentReference *depth_attachment_reference;
+    Array<VkAttachmentReference> *input_attachment_refs;
+    Array<VkAttachmentReference> *color_attachment_refs;
+    VkAttachmentReference *depth_attachment_ref;
 };
 
 struct AttachmentInfo {
@@ -156,6 +168,7 @@ struct Pipeline {
 struct VulkanInfo {
     u32 max_buffers;
     u32 max_regions;
+    u32 max_images;
     u32 max_render_passes;
     u32 max_shaders;
     u32 max_pipelines;
@@ -171,6 +184,7 @@ struct Vulkan {
     struct {
         Pool<Buffer> *buffer;
         Pool<Region> *region;
+        Pool<Image> *image;
         Pool<RenderPass> *render_pass;
         Pool<Shader> *shader;
         Pool<Pipeline> *pipeline;
@@ -645,6 +659,7 @@ static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanIn
     vk->mem.temp = create_stack_allocator(module_mem, megabyte(1));
     vk->pool.buffer = create_pool<Buffer>(vk->mem.module, info.max_buffers);
     vk->pool.region = create_pool<Region>(vk->mem.module, info.max_regions);
+    vk->pool.image = create_pool<Image>(vk->mem.module, info.max_images);
     vk->pool.render_pass = create_pool<RenderPass>(vk->mem.module, info.max_render_passes);
     vk->pool.shader = create_pool<Shader>(vk->mem.module, info.max_shaders);
     vk->pool.pipeline = create_pool<Pipeline>(vk->mem.module, info.max_pipelines);
@@ -747,6 +762,22 @@ static void write_to_device_region(Vulkan *vk, VkCommandBuffer cmd_buf,
     vkCmdCopyBuffer(cmd_buf, staging_region->buffer->handle, region->buffer->handle, 1, &copy);
 }
 
+static Image *create_image(Vulkan *vk, ImageInfo info) {
+    Image *image = allocate(vk->pool.image);
+    validate_result(vkCreateImage(vk->device, &info.image, NULL, &image->handle), "failed to create image");
+
+    // Allocate / Bind Memory
+    VkMemoryRequirements mem_reqs = {};
+    vkGetImageMemoryRequirements(vk->device, image->handle, &mem_reqs);
+    image->mem = allocate_device_memory(vk, mem_reqs, info.mem_property_flags);
+    validate_result(vkBindImageMemory(vk->device, image->handle, image->mem, 0), "failed to bind image memory");
+
+    info.view.image = image->handle;
+    validate_result(vkCreateImageView(vk->device, &info.view, NULL, &image->view), "failed to create image view");
+
+    return image;
+}
+
 ////////////////////////////////////////////////////////////
 /// Resource Creation
 ////////////////////////////////////////////////////////////
@@ -767,14 +798,14 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
         VkSubpassDescription *description = push(subpass_descriptions);
         description->pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 
-        if (subpass_info->input_attachment_references) {
-            description->inputAttachmentCount = subpass_info->input_attachment_references->count;
-            description->pInputAttachments = subpass_info->input_attachment_references->data;
+        if (subpass_info->input_attachment_refs) {
+            description->inputAttachmentCount = subpass_info->input_attachment_refs->count;
+            description->pInputAttachments = subpass_info->input_attachment_refs->data;
         }
 
-        if (subpass_info->color_attachment_references) {
-            description->colorAttachmentCount = subpass_info->color_attachment_references->count;
-            description->pColorAttachments = subpass_info->color_attachment_references->data;
+        if (subpass_info->color_attachment_refs) {
+            description->colorAttachmentCount = subpass_info->color_attachment_refs->count;
+            description->pColorAttachments = subpass_info->color_attachment_refs->data;
         }
 
         if (subpass_info->preserve_attachment_indexes) {
@@ -783,7 +814,7 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
         }
 
         description->pResolveAttachments = NULL;
-        description->pDepthStencilAttachment = subpass_info->depth_attachment_reference;
+        description->pDepthStencilAttachment = subpass_info->depth_attachment_ref;
     }
 
     // Render Pass
