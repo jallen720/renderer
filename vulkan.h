@@ -87,6 +87,11 @@ struct Image {
     VkDeviceMemory mem;
 };
 
+struct ImageSampler {
+    Image *image;
+    VkSampler sampler;
+};
+
 struct SubpassInfo {
     Array<u32> *preserve_attachment_indexes;
     Array<VkAttachmentReference> *input_attachment_refs;
@@ -144,14 +149,21 @@ struct DescriptorInfo {
     VkShaderStageFlags stage;
 };
 
+union DescriptorBinding {
+    Region *uniform_buffer;
+    ImageSampler *image_sampler;
+};
+
 struct PipelineInfo {
     FixedArray<Shader *, 8> shaders;
     FixedArray<VkPipelineColorBlendAttachmentState, 8> color_blend_attachments;
 
-    Array<VkViewport> *viewports;
-    Array<VkRect2D> *scissors;
     Array<VkDescriptorSetLayout> *descriptor_set_layouts;
     Array<VkPushConstantRange> *push_constant_ranges;
+    Array<VkVertexInputBindingDescription> *vertex_bindings;
+    Array<VkVertexInputAttributeDescription> *vertex_attributes;
+    Array<VkViewport> *viewports;
+    Array<VkRect2D> *scissors;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly;
     VkPipelineDepthStencilStateCreateInfo depth_stencil;
@@ -169,6 +181,7 @@ struct VulkanInfo {
     u32 max_buffers;
     u32 max_regions;
     u32 max_images;
+    u32 max_samplers;
     u32 max_render_passes;
     u32 max_shaders;
     u32 max_pipelines;
@@ -778,6 +791,12 @@ static Image *create_image(Vulkan *vk, ImageInfo info) {
     return image;
 }
 
+static VkSampler create_sampler(VkDevice device, VkSamplerCreateInfo info) {
+    VkSampler sampler = VK_NULL_HANDLE;
+    validate_result(vkCreateSampler(device, &info, NULL, &sampler), "failed to create sampler");
+    return sampler;
+}
+
 ////////////////////////////////////////////////////////////
 /// Resource Creation
 ////////////////////////////////////////////////////////////
@@ -839,12 +858,15 @@ static Shader *create_shader(Vulkan *vk, cstr spirv_path, VkShaderStageFlagBits 
     auto shader = allocate(vk->pool.shader);
     shader->stage = stage;
 
-    Array<u8> *byte_code = read_file<u8>(vk->mem.temp, spirv_path);
+    Array<u8> *bytecode = read_file<u8>(vk->mem.temp, spirv_path);
+    if (bytecode == NULL)
+        CTK_FATAL("failed to load bytecode from \"%s\"", spirv_path);
+
     VkShaderModuleCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     info.flags = 0;
-    info.codeSize = byte_size(byte_code);
-    info.pCode = (const u32 *)byte_code->data;
+    info.codeSize = byte_size(bytecode);
+    info.pCode = (const u32 *)bytecode->data;
     validate_result(vkCreateShaderModule(vk->device, &info, NULL, &shader->handle),
                     "failed to create shader from SPIR-V bytecode in \"%p\"", spirv_path);
 
@@ -966,7 +988,7 @@ static VkDescriptorSet allocate_descriptor_set(Vulkan *vk, VkDescriptorPool pool
 };
 
 static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, u32 descriptor_count,
-                                  DescriptorInfo *descriptor_infos, Region **descriptor_regions)
+                                  DescriptorInfo *descriptor_infos, DescriptorBinding *descriptor_bindings)
 {
     push_frame(vk->mem.temp);
 
@@ -976,7 +998,7 @@ static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, u3
 
     for (u32 i = 0; i < descriptor_count; ++i) {
         DescriptorInfo *descriptor_info = descriptor_infos + i;
-        Region *descriptor_region = descriptor_regions[i];
+        DescriptorBinding *descriptor_binding = descriptor_bindings + i;
 
         VkWriteDescriptorSet *write = push(writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -991,16 +1013,19 @@ static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, u3
             descriptor_info->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         {
             VkDescriptorBufferInfo *info = push(buf_infos);
-            info->buffer = descriptor_region->buffer->handle;
-            info->offset = descriptor_region->offset;
-            info->range = descriptor_region->size;
+            info->buffer = descriptor_binding->uniform_buffer->buffer->handle;
+            info->offset = descriptor_binding->uniform_buffer->offset;
+            info->range = descriptor_binding->uniform_buffer->size;
+
             write->pBufferInfo = info;
         }
         else if (descriptor_info->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-            // VkDescriptorImageInfo *info = push(img_infos);
-            // info->sampler = t->sampler;
-            // info->imageView = t->view;
-            // info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            VkDescriptorImageInfo *info = push(img_infos);
+            info->sampler = descriptor_binding->image_sampler->sampler;
+            info->imageView = descriptor_binding->image_sampler->image->view;
+            info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            write->pImageInfo = info;
         }
         else {
             CTK_FATAL("unhandled descriptor type when updating descriptor set");
@@ -1125,42 +1150,29 @@ static Pipeline *create_pipeline(Vulkan *vk, RenderPass *render_pass, u32 subpas
                     "failed to create graphics pipeline layout");
 
     // Vertex Attribute Descriptions
-    // auto vert_attrib_descs =
+    // auto vertex_attrib_descs =
     //     create_array<VkVertexInputAttributeDescription>(vk->mem.temp, info->vertex_inputs->count);
 
     // for (u32 i = 0; i < info->vertex_inputs->count; ++i) {
-    //     VertexInput *vert_input = info->vertex_inputs->data + i;
-    //     push(vert_attrib_descs, {
-    //         .location = vert_input->location,
-    //         .binding = vert_input->binding,
-    //         .format = vert_input->attribute->format,
-    //         .offset = vert_input->attribute->offset,
+    //     VertexInput *vertex_input = info->vertex_inputs->data + i;
+    //     push(vertex_attrib_descs, {
+    //         .location = vertex_input->location,
+    //         .binding = vertex_input->binding,
+    //         .format = vertex_input->attribute->format,
+    //         .offset = vertex_input->attribute->offset,
     //     });
     // }
 
-    VkVertexInputBindingDescription vert_input_binding_descs[] = {
-        {
-            .binding = 0,
-            .stride = 12,
-            .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-        },
-    };
-
-    VkVertexInputAttributeDescription vert_attrib_descs[] = {
-        {
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = 0,
-        },
-    };
-
     VkPipelineVertexInputStateCreateInfo vertex_input = {};
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertex_input.vertexBindingDescriptionCount = CTK_ARRAY_SIZE(vert_input_binding_descs);
-    vertex_input.pVertexBindingDescriptions = vert_input_binding_descs;
-    vertex_input.vertexAttributeDescriptionCount = CTK_ARRAY_SIZE(vert_attrib_descs);
-    vertex_input.pVertexAttributeDescriptions = vert_attrib_descs;
+    if (info->vertex_bindings) {
+        vertex_input.vertexBindingDescriptionCount = info->vertex_bindings->count;
+        vertex_input.pVertexBindingDescriptions = info->vertex_bindings->data;
+    }
+    if (info->vertex_attributes) {
+        vertex_input.vertexAttributeDescriptionCount = info->vertex_attributes->count;
+        vertex_input.pVertexAttributeDescriptions = info->vertex_attributes->data;
+    }
 
     // // Viewport State
     // VkPipelineViewportStateCreateInfo viewport_state = {};
