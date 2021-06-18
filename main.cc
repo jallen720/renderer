@@ -1,3 +1,7 @@
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#include "stb/stb_image.h"
+
 #include "renderer/platform.h"
 #include "renderer/vulkan.h"
 #include "ctk/math.h"
@@ -126,20 +130,43 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
     }
 }
 
+static Image *load_image(Graphics *gfx, Vulkan *vk, cstr path, ImageInfo info) {
+    // Load Image Data to Staging Region
+    s32 width = 0;
+    s32 height = 0;
+    s32 channel_count = 0;
+    stbi_uc *data = stbi_load(path, &width, &height, &channel_count, STBI_rgb_alpha);
+    if (data == NULL)
+        CTK_FATAL("failed to load image from \"%s\"", path)
+
+    write_to_host_region(vk->device, gfx->staging_region, 0, data, width * height * STBI_rgb_alpha);
+    stbi_image_free(data);
+
+    info.image.extent.width = (u32)width;
+    info.image.extent.height = (u32)height;
+
+    // Create Vulkan Image
+    VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
+    Image *image = create_image(vk, info);
+
+    // Write Image Data to Vulkan Image
+    begin_temp_cmd_buf(gfx->temp_cmd_buf);
+        write_to_image(vk, gfx->temp_cmd_buf, gfx->staging_region, 0, image);
+    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
+
+    return image;
+}
+
 static void create_images(Graphics *gfx, Vulkan *vk) {
     {
         VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
-        gfx->image.test = create_image(vk, {
+        gfx->image.test = load_image(gfx, vk, "data/test.png", {
             .image = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                 .flags = 0,
                 .imageType = VK_IMAGE_TYPE_2D,
                 .format = fmt,
-                .extent = {
-                    .width = 16,
-                    .height = 16,
-                    .depth = 1,
-                },
+                .extent = { .depth = 1 },
                 .mipLevels = 1,
                 .arrayLayers = 1,
                 .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -171,30 +198,6 @@ static void create_images(Graphics *gfx, Vulkan *vk) {
             },
             .mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         });
-
-        begin_temp_cmd_buf(gfx->temp_cmd_buf);
-            VkImageMemoryBarrier mem_barrier = {};
-            mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            mem_barrier.srcAccessMask = 0;
-            mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            mem_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            mem_barrier.image = gfx->image.test->handle;
-            mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            mem_barrier.subresourceRange.baseMipLevel = 0;
-            mem_barrier.subresourceRange.levelCount = 1;
-            mem_barrier.subresourceRange.baseArrayLayer = 0;
-            mem_barrier.subresourceRange.layerCount = 1;
-            vkCmdPipelineBarrier(gfx->temp_cmd_buf,
-                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                 0, // Dependency Flags
-                                 0, NULL, // Memory Barriers
-                                 0, NULL, // Buffer Memory Barriers
-                                 1, &mem_barrier); // Image Memory Barriers
-        submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
     }
 }
 
@@ -488,13 +491,17 @@ static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<
 static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
     {
         auto vertexes = create_array<Vertex>(app->mem.fixed, 64);
-        push(vertexes, { { -0.4f,  0.4f, 0 }, { 0,    1 } });
-        push(vertexes, { {  0,    -0.4f, 0 }, { 0.5f, 0 } });
-        push(vertexes, { {  0.4f,  0.4f, 0 }, { 0,    1 } });
+        push(vertexes, { { -0.4f, -0.4f, 0 }, { 0, 0 } });
+        push(vertexes, { { -0.4f,  0.4f, 0 }, { 0, 1 } });
+        push(vertexes, { {  0.4f,  0.4f, 0 }, { 1, 1 } });
+        push(vertexes, { {  0.4f, -0.4f, 0 }, { 1, 0 } });
 
-        auto indexes = create_array<u32>(app->mem.fixed, 3);
+        auto indexes = create_array<u32>(app->mem.fixed, 6);
         push(indexes, 0u);
+        push(indexes, 2u);
         push(indexes, 1u);
+        push(indexes, 0u);
+        push(indexes, 3u);
         push(indexes, 2u);
 
         push_mesh(gfx, vk, vertexes, indexes);

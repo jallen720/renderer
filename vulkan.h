@@ -85,6 +85,7 @@ struct Image {
     VkImage handle;
     VkImageView view;
     VkDeviceMemory mem;
+    VkExtent3D extent;
 };
 
 struct ImageSampler {
@@ -752,12 +753,12 @@ static Region *allocate_uniform_buffer_region(Vulkan *vk, Buffer *buffer, u32 si
     return allocate_region(vk, buffer, size, vk->physical_device.min_uniform_buffer_region_align);
 }
 
-static void write_to_host_region(Vulkan *vk, Region *region, u32 offset, void *data, u32 size) {
+static void write_to_host_region(VkDevice device, Region *region, u32 offset, void *data, u32 size) {
     CTK_ASSERT(size <= region->size);
     void *mapped_mem = NULL;
-    vkMapMemory(vk->device, region->buffer->mem, region->offset + offset, size, 0, &mapped_mem);
+    vkMapMemory(device, region->buffer->mem, region->offset + offset, size, 0, &mapped_mem);
     memcpy(mapped_mem, data, size);
-    vkUnmapMemory(vk->device, region->buffer->mem);
+    vkUnmapMemory(device, region->buffer->mem);
 }
 
 static void write_to_device_region(Vulkan *vk, VkCommandBuffer cmd_buf,
@@ -765,7 +766,7 @@ static void write_to_device_region(Vulkan *vk, VkCommandBuffer cmd_buf,
                                    Region *region, u32 offset,
                                    void *data, u32 size)
 {
-    write_to_host_region(vk, staging_region, staging_offset, data, size);
+    write_to_host_region(vk->device, staging_region, staging_offset, data, size);
 
     VkBufferCopy copy = {};
     copy.srcOffset = staging_region->offset + staging_offset;
@@ -779,6 +780,8 @@ static Image *create_image(Vulkan *vk, ImageInfo info) {
     Image *image = allocate(vk->pool.image);
     validate_result(vkCreateImage(vk->device, &info.image, NULL, &image->handle), "failed to create image");
 
+    image->extent = info.image.extent;
+
     // Allocate / Bind Memory
     VkMemoryRequirements mem_reqs = {};
     vkGetImageMemoryRequirements(vk->device, image->handle, &mem_reqs);
@@ -789,6 +792,67 @@ static Image *create_image(Vulkan *vk, ImageInfo info) {
     validate_result(vkCreateImageView(vk->device, &info.view, NULL, &image->view), "failed to create image view");
 
     return image;
+}
+
+static void write_to_image(Vulkan *vk, VkCommandBuffer cmd_buf, Region *region, u32 offset, Image *image) {
+    VkImageMemoryBarrier pre_mem_barrier = {};
+    pre_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    pre_mem_barrier.srcAccessMask = 0;
+    pre_mem_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    pre_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    pre_mem_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    pre_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    pre_mem_barrier.image = image->handle;
+    pre_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    pre_mem_barrier.subresourceRange.baseMipLevel = 0;
+    pre_mem_barrier.subresourceRange.levelCount = 1;
+    pre_mem_barrier.subresourceRange.baseArrayLayer = 0;
+    pre_mem_barrier.subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(cmd_buf,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, // Dependency Flags
+                         0, NULL, // Memory Barriers
+                         0, NULL, // Buffer Memory Barriers
+                         1, &pre_mem_barrier); // Image Memory Barriers
+
+    VkBufferImageCopy copy = {};
+    copy.bufferOffset = offset;
+    copy.bufferRowLength = 0;
+    copy.bufferImageHeight = 0;
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.mipLevel = 0;
+    copy.imageSubresource.baseArrayLayer = 0;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageOffset.x = 0;
+    copy.imageOffset.y = 0;
+    copy.imageOffset.z = 0;
+    copy.imageExtent = image->extent;
+    vkCmdCopyBufferToImage(cmd_buf, region->buffer->handle, image->handle,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    VkImageMemoryBarrier post_mem_barrier = {};
+    post_mem_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    post_mem_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    post_mem_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    post_mem_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    post_mem_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    post_mem_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post_mem_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    post_mem_barrier.image = image->handle;
+    post_mem_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    post_mem_barrier.subresourceRange.baseMipLevel = 0;
+    post_mem_barrier.subresourceRange.levelCount = 1;
+    post_mem_barrier.subresourceRange.baseArrayLayer = 0;
+    post_mem_barrier.subresourceRange.layerCount = 1;
+    vkCmdPipelineBarrier(cmd_buf,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, // Dependency Flags
+                         0, NULL, // Memory Barriers
+                         0, NULL, // Buffer Memory Barriers
+                         1, &post_mem_barrier); // Image Memory Barriers
 }
 
 static VkSampler create_sampler(VkDevice device, VkSamplerCreateInfo info) {
