@@ -51,20 +51,8 @@ struct Graphics {
     Region *staging_region;
 
     struct {
-        Image *test;
-    } image;
-
-    struct {
         VkSampler test;
     } sampler;
-
-    struct {
-        Array<Region *> *color;
-    } uniform_buffer;
-
-    struct {
-        ImageSampler test;
-    } image_sampler;
 
     VkDescriptorPool descriptor_pool;
 
@@ -100,8 +88,24 @@ struct Graphics {
         u32 swap_img_idx;
         u32 curr_frame_idx;
     } sync;
+};
 
-    Array<Mesh> *meshes;
+struct Test {
+    struct {
+        Mesh quad;
+    } mesh;
+
+    struct {
+        Image *test;
+    } image;
+
+    struct {
+        Array<Region *> *color;
+    } uniform_buffer;
+
+    struct {
+        ImageSampler test;
+    } image_sampler;
 };
 
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
@@ -130,82 +134,11 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static Image *load_image(Graphics *gfx, Vulkan *vk, cstr path, ImageInfo info) {
-    // Load Image Data to Staging Region
-    s32 width = 0;
-    s32 height = 0;
-    s32 channel_count = 0;
-    stbi_uc *data = stbi_load(path, &width, &height, &channel_count, STBI_rgb_alpha);
-    if (data == NULL)
-        CTK_FATAL("failed to load image from \"%s\"", path)
-
-    write_to_host_region(vk->device, gfx->staging_region, 0, data, width * height * STBI_rgb_alpha);
-    stbi_image_free(data);
-
-    info.image.extent.width = (u32)width;
-    info.image.extent.height = (u32)height;
-
-    // Create Vulkan Image
-    VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
-    Image *image = create_image(vk, info);
-
-    // Write Image Data to Vulkan Image
-    begin_temp_cmd_buf(gfx->temp_cmd_buf);
-        write_to_image(vk, gfx->temp_cmd_buf, gfx->staging_region, 0, image);
-    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
-
-    return image;
-}
-
-static void create_images(Graphics *gfx, Vulkan *vk) {
-    {
-        VkFormat fmt = VK_FORMAT_R8G8B8A8_UNORM;
-        gfx->image.test = load_image(gfx, vk, "data/test.png", {
-            .image = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                .flags = 0,
-                .imageType = VK_IMAGE_TYPE_2D,
-                .format = fmt,
-                .extent = { .depth = 1 },
-                .mipLevels = 1,
-                .arrayLayers = 1,
-                .samples = VK_SAMPLE_COUNT_1_BIT,
-                .tiling = VK_IMAGE_TILING_OPTIMAL,
-                .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-                .queueFamilyIndexCount = 0, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
-                .pQueueFamilyIndices = NULL, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            },
-            .view = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .flags = 0,
-                .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                .format = fmt,
-                .components = {
-                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-                },
-                .subresourceRange = {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1,
-                },
-            },
-            .mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        });
-    }
-}
-
 static void create_samplers(Graphics *gfx, Vulkan *vk) {
     gfx->sampler.test = create_sampler(vk->device, {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_LINEAR,
-        .minFilter = VK_FILTER_LINEAR,
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
         .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
         .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
@@ -236,12 +169,6 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
 
     // Color
     {
-        push_frame(app->mem.temp);
-
-        gfx->uniform_buffer.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i)
-            gfx->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
-
         DescriptorInfo descriptor_infos[] = {
             { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
         };
@@ -252,25 +179,10 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
         gfx->descriptor_set.color = create_array<VkDescriptorSet>(app->mem.fixed, vk->swapchain.image_count);
         allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.color,
                                  vk->swapchain.image_count, gfx->descriptor_set.color->data);
-
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-            DescriptorBinding descriptor_bindings[] = {
-                { .uniform_buffer = gfx->uniform_buffer.color->data[i] },
-            };
-
-            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(descriptor_infos),
-                                  descriptor_infos, descriptor_bindings);
-        }
-
-        pop_frame(app->mem.temp);
     }
 
     // Sampler
     {
-        push_frame(app->mem.temp);
-
-        gfx->image_sampler.test = { gfx->image.test, gfx->sampler.test };
-
         DescriptorInfo descriptor_infos[] = {
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT }
         };
@@ -280,15 +192,6 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
 
         allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.sampler,
                                  1, &gfx->descriptor_set.sampler);
-
-        DescriptorBinding descriptor_bindings[] = {
-            { .image_sampler = &gfx->image_sampler.test },
-        };
-
-        update_descriptor_set(vk, gfx->descriptor_set.sampler, CTK_ARRAY_SIZE(descriptor_infos),
-                              descriptor_infos, descriptor_bindings);
-
-        pop_frame(app->mem.temp);
     }
 }
 
@@ -453,27 +356,23 @@ static Graphics *create_graphics(App *app, Vulkan *vk) {
     alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1, &gfx->temp_cmd_buf);
     create_buffers(gfx, vk);
     gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64), 16);
-    create_images(gfx, vk);
     create_samplers(gfx, vk);
-    create_shaders(gfx, vk);
     create_descriptor_sets(gfx, vk, app);
+    create_shaders(gfx, vk);
     create_render_passes(gfx, vk, app);
     create_pipelines(gfx, vk, app);
 
     init_swap_state(gfx, vk, app);
     init_sync(gfx, app, vk, 1);
-    gfx->meshes = create_array<Mesh>(app->mem.fixed, 64);
 
     return gfx;
 }
 
-static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
-    Mesh *mesh = push(gfx->meshes, {
-        .vertexes = vertexes,
-        .indexes = indexes,
-        .vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 16),
-        .index_region = allocate_region(vk, gfx->buffer.device, byte_count(indexes), 16),
-    });
+static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
+    mesh->vertexes = vertexes,
+    mesh->indexes = indexes,
+    mesh->vertex_region = allocate_region(vk, gfx->buffer.device, byte_count(vertexes), 16),
+    mesh->index_region = allocate_region(vk, gfx->buffer.device, byte_count(indexes), 16),
 
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         u32 vertex_data_size = byte_count(mesh->vertexes);
@@ -488,13 +387,13 @@ static void push_mesh(Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
-static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
+static void create_meshes(Test *test, App *app, Graphics *gfx, Vulkan *vk) {
     {
         auto vertexes = create_array<Vertex>(app->mem.fixed, 64);
-        push(vertexes, { { -0.4f, -0.4f, 0 }, { 0, 0 } });
-        push(vertexes, { { -0.4f,  0.4f, 0 }, { 0, 1 } });
-        push(vertexes, { {  0.4f,  0.4f, 0 }, { 1, 1 } });
-        push(vertexes, { {  0.4f, -0.4f, 0 }, { 1, 0 } });
+        push(vertexes, { { -1, -1, 0 }, { 0, 0 } });
+        push(vertexes, { { -1,  1, 0 }, { 0, 1 } });
+        push(vertexes, { {  1,  1, 0 }, { 1, 1 } });
+        push(vertexes, { {  1, -1, 0 }, { 1, 0 } });
 
         auto indexes = create_array<u32>(app->mem.fixed, 6);
         push(indexes, 0u);
@@ -504,8 +403,120 @@ static void create_test_data(App *app, Graphics *gfx, Vulkan *vk) {
         push(indexes, 3u);
         push(indexes, 2u);
 
-        push_mesh(gfx, vk, vertexes, indexes);
+        init_mesh(&test->mesh.quad, gfx, vk, vertexes, indexes);
     }
+}
+
+static Image *load_image(Graphics *gfx, Vulkan *vk, cstr path, ImageInfo info) {
+    // Load Image Data to Staging Region
+    s32 width = 0;
+    s32 height = 0;
+    s32 channel_count = 0;
+    stbi_uc *data = stbi_load(path, &width, &height, &channel_count, STBI_rgb_alpha);
+    if (data == NULL)
+        CTK_FATAL("failed to load image from \"%s\"", path)
+
+    write_to_host_region(vk->device, gfx->staging_region, 0, data, width * height * STBI_rgb_alpha);
+    stbi_image_free(data);
+
+    info.image.extent.width = (u32)width;
+    info.image.extent.height = (u32)height;
+
+    // Create Vulkan Image
+    Image *image = create_image(vk, info);
+
+    // Write Image Data to Vulkan Image
+    begin_temp_cmd_buf(gfx->temp_cmd_buf);
+        write_to_image(vk, gfx->temp_cmd_buf, gfx->staging_region, 0, image);
+    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
+
+    return image;
+}
+
+static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
+    VkFormat color_format = VK_FORMAT_R8G8B8A8_UNORM;
+
+    {
+        test->image.test = load_image(gfx, vk, "data/test.png", {
+            .image = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                .flags = 0,
+                .imageType = VK_IMAGE_TYPE_2D,
+                .format = color_format,
+                .extent = { .depth = 1 },
+                .mipLevels = 1,
+                .arrayLayers = 1,
+                .samples = VK_SAMPLE_COUNT_1_BIT,
+                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 0, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+                .pQueueFamilyIndices = NULL, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            .view = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .flags = 0,
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .format = color_format,
+                .components = {
+                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+                },
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            },
+            .mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        });
+    }
+}
+
+static void create_uniform_buffers(Test *test, App *app, Graphics *gfx, Vulkan *vk) {
+    // Color
+    {
+        test->uniform_buffer.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i)
+            test->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
+
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+            DescriptorBinding descriptor_bindings[] = {
+                { .uniform_buffer = test->uniform_buffer.color->data[i] },
+            };
+
+            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(descriptor_infos),
+                                  descriptor_infos, descriptor_bindings);
+        }
+    }
+}
+
+static void create_image_samplers(Test *test, Graphics *gfx, Vulkan *vk) {
+    // Test
+    {
+        test->image_sampler.test = { gfx->image.test, gfx->sampler.test };
+
+        DescriptorBinding descriptor_bindings[] = {
+            { .image_sampler = &test->image_sampler.test },
+        };
+
+        update_descriptor_set(vk, gfx->descriptor_set.sampler, CTK_ARRAY_SIZE(descriptor_infos),
+                              descriptor_infos, descriptor_bindings);
+    }
+}
+
+static Test *create_test(App *app, Graphics *gfx, Vulkan *vk) {
+    auto test = allocate<Test>(app->mem.fixed, 1);
+    create_meshes(test, app, gfx, vk);
+    create_images(test, gfx, vk);
+    create_uniform_buffers(test, app, gfx, vk);
+    create_image_samplers(test, gfx, vk);
+    return test;
 }
 
 static void next_frame(Graphics *gfx, Vulkan *vk) {
@@ -531,7 +542,7 @@ static void update_render_state(Graphics *gfx, Vulkan *vk, Vec3<f32> *color) {
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
-static void render(Graphics *gfx, Vulkan *vk) {
+static void render(Graphics *gfx, Vulkan *vk, Test *test) {
     VkCommandBuffer cmd_buf = gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -562,7 +573,7 @@ static void render(Graphics *gfx, Vulkan *vk) {
                                 0, NULL);
 
         // Bind mesh data.
-        Mesh *mesh = gfx->meshes->data + 0;
+        Mesh *mesh = &test->mesh.test;
         vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
         vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
                              VK_INDEX_TYPE_UINT32);
@@ -623,8 +634,8 @@ s32 main() {
         .surface = {
             .x = 600,
             .y = 100,
-            .width = 1280,
-            .height = 720,
+            .width = 1000,
+            .height = 600,
         },
         .title = L"Renderer",
     });
@@ -639,9 +650,7 @@ s32 main() {
     });
 
     Graphics *gfx = create_graphics(app, vk);
-
-    // Test
-    create_test_data(app, gfx, vk);
+    Test *test = create_test(app, gfx, vk);
     Vec3<f32> color = {};
 
     // Main Loop
