@@ -645,9 +645,15 @@ s32 main() {
     Vec3<f32> color = {};
 
     // Main Loop
-    while (platform->window->open) {
-        // Input
+    while (1) {
+        // Events
         process_events(platform->window);
+
+        // Quit event closed the window.
+        if (!platform->window->open)
+            break;
+
+        // Input
         if (key_down(platform, InputKey::ESCAPE))
             break;
 
