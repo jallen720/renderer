@@ -8,5 +8,5 @@ layout (set = 0, binding = 0, std140) uniform Color {
 } color;
 
 void main() {
-    out_color = vec4(color.data.rgb + vec3(0.5), 1);
+    out_color = vec4(color.data.rgb, 1);
 }

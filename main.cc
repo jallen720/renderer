@@ -72,7 +72,8 @@ struct Graphics {
     RenderPass *main_render_pass;
 
     struct {
-        Pipeline *direct;
+        Pipeline *color;
+        Pipeline *sampler;
     } pipeline;
 
     struct {
@@ -104,6 +105,13 @@ struct Test {
     struct {
         ImageSampler test;
     } image_sampler;
+
+    enum struct Pipeline {
+        COLOR,
+        SAMPLER,
+    } pipeline;
+
+    Vec3<f32> color;
 };
 
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
@@ -266,10 +274,62 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, Memory *mem) {
 }
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk, Memory *mem) {
+    VkVertexInputBindingDescription default_vertex_binding = {
+        .binding = 0,
+        .stride = 20,
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    };
+
+    VkExtent2D surface_extent = get_surface_extent(vk);
+
+    VkViewport default_viewport = {
+        .x = 0,
+        .y = 0,
+        .width = (f32)surface_extent.width,
+        .height = (f32)surface_extent.height,
+        .minDepth = 1,
+        .maxDepth = 0
+    };
+
+    VkRect2D default_scissor = {
+        .offset = { 0, 0 },
+        .extent = surface_extent
+    };
+
+    // Color
     {
         push_frame(mem->temp);
 
-        VkExtent2D surface_extent = get_surface_extent(vk);
+        PipelineInfo info = DEFAULT_PIPELINE_INFO;
+        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, 1);
+        info.vertex_bindings = create_array<VkVertexInputBindingDescription>(vk->mem.temp, 1);
+        info.vertex_attributes = create_array<VkVertexInputAttributeDescription>(vk->mem.temp, 2);
+        info.viewports = create_array<VkViewport>(vk->mem.temp, 1);
+        info.scissors = create_array<VkRect2D>(vk->mem.temp, 1);
+
+        push(&info.shaders, gfx->shader.color.vert);
+        push(&info.shaders, gfx->shader.color.frag);
+        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
+
+        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.color);
+        push(info.vertex_bindings, default_vertex_binding);
+        push(info.vertex_attributes, {
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = 0,
+        });
+        push(info.viewports, default_viewport);
+        push(info.scissors, default_scissor);
+
+        gfx->pipeline.color = create_pipeline(vk, gfx->main_render_pass, 0, &info);
+
+        pop_frame(mem->temp);
+    }
+
+    // Sampler
+    {
+        push_frame(mem->temp);
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
         info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, 1);
@@ -283,7 +343,7 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, Memory *mem) {
         push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
         push(info.descriptor_set_layouts, gfx->descriptor_set_layout.sampler);
-        push(info.vertex_bindings, { .binding = 0, .stride = 20, .inputRate = VK_VERTEX_INPUT_RATE_VERTEX });
+        push(info.vertex_bindings, default_vertex_binding);
         push(info.vertex_attributes, {
             .location = 0,
             .binding = 0,
@@ -296,17 +356,10 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, Memory *mem) {
             .format = VK_FORMAT_R32G32_SFLOAT,
             .offset = 12,
         });
-        push(info.viewports, {
-            .x = 0,
-            .y = 0,
-            .width = (f32)surface_extent.width,
-            .height = (f32)surface_extent.height,
-            .minDepth = 1,
-            .maxDepth = 0,
-        });
-        push(info.scissors, { .offset = { 0, 0 }, .extent = surface_extent });
+        push(info.viewports, default_viewport);
+        push(info.scissors, default_scissor);
 
-        gfx->pipeline.direct = create_pipeline(vk, gfx->main_render_pass, 0, &info);
+        gfx->pipeline.sampler = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
         pop_frame(mem->temp);
     }
@@ -523,6 +576,20 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk) {
     return test;
 }
 
+static void handle_input(Test *test, Platform *platform) {
+    if (key_down(platform, InputKey::ESCAPE)) {
+        platform->window->open = false;
+        return;
+    }
+
+         if (key_down(platform, InputKey::Q)) test->color = { 1, 0.5f, 0.5f };
+    else if (key_down(platform, InputKey::W)) test->color = { 0.5f, 1, 0.5f };
+    else if (key_down(platform, InputKey::E)) test->color = { 0.5f, 0.5f, 1 };
+
+         if (key_down(platform, InputKey::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
+    else if (key_down(platform, InputKey::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
+}
+
 static void next_frame(Graphics *gfx, Vulkan *vk) {
     // Update current frame and wait until it is no longer in-flight.
     if (++gfx->sync.curr_frame_idx >= gfx->sync.frames->size)
@@ -537,12 +604,12 @@ static void next_frame(Graphics *gfx, Vulkan *vk) {
     gfx->sync.swap_img_idx = next_swap_img_idx(vk, gfx->sync.frame->img_aquired, VK_NULL_HANDLE);
 }
 
-static void update_render_state(Graphics *gfx, Vulkan *vk, Test *test, Vec3<f32> *color) {
+static void update_render_state(Graphics *gfx, Vulkan *vk, Test *test) {
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, gfx->temp_cmd_buf,
                                gfx->staging_region, 0,
                                test->uniform_buffer.color->data[gfx->sync.swap_img_idx], 0,
-                               color, sizeof(*color));
+                               &test->color, sizeof(test->color));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
@@ -565,16 +632,30 @@ static void render(Graphics *gfx, Vulkan *vk, Test *test) {
         .extent = vk->swapchain.extent,
     };
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->handle);
+        if (test->pipeline == Test::Pipeline::COLOR) {
+            vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.color->handle);
 
-        // Bind descriptor sets.
-        VkDescriptorSet descriptor_sets[] = {
-            gfx->descriptor_set.sampler,
-        };
+            // Bind descriptor sets.
+            VkDescriptorSet descriptor_sets[] = {
+                gfx->descriptor_set.color->data[gfx->sync.swap_img_idx],
+            };
 
-        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.direct->layout,
-                                0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
-                                0, NULL);
+            vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.color->layout,
+                                    0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
+                                    0, NULL);
+        }
+        else {
+            vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.sampler->handle);
+
+            // Bind descriptor sets.
+            VkDescriptorSet descriptor_sets[] = {
+                gfx->descriptor_set.sampler,
+            };
+
+            vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.sampler->layout,
+                                    0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
+                                    0, NULL);
+        }
 
         // Bind mesh data.
         Mesh *mesh = &test->mesh.quad;
@@ -655,28 +736,24 @@ s32 main() {
 
     Graphics *gfx = create_graphics(mem, vk);
     Test *test = create_test(mem, gfx, vk);
-    Vec3<f32> color = {};
 
     // Main Loop
     while (1) {
-        // Events
         process_events(platform->window);
 
         // Quit event closed the window.
         if (!platform->window->open)
             break;
 
-        // Input
-        if (key_down(platform, InputKey::ESCAPE))
-            break;
+        handle_input(test, platform);
 
-             if (key_down(platform, InputKey::Q)) color = { 1, 0, 0 };
-        else if (key_down(platform, InputKey::W)) color = { 0, 1, 0 };
-        else if (key_down(platform, InputKey::E)) color = { 0, 0, 1 };
+        // Input closed the window.
+        if (!platform->window->open)
+            break;
 
         // Rendering
         next_frame(gfx, vk);
-        update_render_state(gfx, vk, test, &color);
+        update_render_state(gfx, vk, test);
         render(gfx, vk, test);
         present(gfx, vk);
     }
