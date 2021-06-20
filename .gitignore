@@ -358,7 +358,5 @@ todo.txt
 *.sublime-*
 *.blend1
 *.vimsession
-# test binary
-test
 *.swp
 *.swo
