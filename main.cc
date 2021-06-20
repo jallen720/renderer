@@ -8,13 +8,11 @@
 
 using namespace ctk;
 
-struct App {
-    struct {
-        Allocator *fixed;
-        Allocator *temp;
-        Allocator *platform;
-        Allocator *vulkan;
-    } mem;
+struct Memory {
+    Allocator *fixed;
+    Allocator *temp;
+    Allocator *platform;
+    Allocator *vulkan;
 };
 
 struct ShaderGroup {
@@ -155,7 +153,7 @@ static void create_samplers(Graphics *gfx, Vulkan *vk) {
     });
 }
 
-static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
+static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, Memory *mem) {
     // Pool
     gfx->descriptor_pool = create_descriptor_pool(vk, {
         .descriptor_count = {
@@ -176,7 +174,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk, App *app) {
         gfx->descriptor_set_layout.color = create_descriptor_set_layout(vk, descriptor_infos,
                                                                         CTK_ARRAY_SIZE(descriptor_infos));
 
-        gfx->descriptor_set.color = create_array<VkDescriptorSet>(app->mem.fixed, vk->swapchain.image_count);
+        gfx->descriptor_set.color = create_array<VkDescriptorSet>(mem->fixed, vk->swapchain.image_count);
         allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.color,
                                  vk->swapchain.image_count, gfx->descriptor_set.color->data);
     }
@@ -220,18 +218,18 @@ static u32 push_attachment(RenderPassInfo *info, AttachmentInfo attachment_info)
     return attachment_index;
 }
 
-static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
+static void create_render_passes(Graphics *gfx, Vulkan *vk, Memory *mem) {
     {
-        push_frame(app->mem.temp);
+        push_frame(mem->temp);
 
         RenderPassInfo info = {
             .attachment = {
-                .descriptions = create_array<VkAttachmentDescription>(app->mem.temp, 1),
-                .clear_values = create_array<VkClearValue>(app->mem.temp, 1),
+                .descriptions = create_array<VkAttachmentDescription>(mem->temp, 1),
+                .clear_values = create_array<VkClearValue>(mem->temp, 1),
             },
             .subpass = {
-                .infos = create_array<SubpassInfo>(app->mem.temp, 1),
-                .dependencies = create_array<VkSubpassDependency>(app->mem.temp, 1),
+                .infos = create_array<SubpassInfo>(mem->temp, 1),
+                .dependencies = create_array<VkSubpassDependency>(mem->temp, 1),
             },
         };
 
@@ -255,7 +253,7 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
 
         // Subpasses
         SubpassInfo *subpass_info = push(info.subpass.infos);
-        subpass_info->color_attachment_refs = create_array<VkAttachmentReference>(app->mem.temp, 1);
+        subpass_info->color_attachment_refs = create_array<VkAttachmentReference>(mem->temp, 1);
         push(subpass_info->color_attachment_refs, {
             .attachment = swapchain_attachment_index,
             .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -263,13 +261,13 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk, App *app) {
 
         gfx->main_render_pass = create_render_pass(vk, &info);
 
-        pop_frame(app->mem.temp);
+        pop_frame(mem->temp);
     }
 }
 
-static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
+static void create_pipelines(Graphics *gfx, Vulkan *vk, Memory *mem) {
     {
-        push_frame(app->mem.temp);
+        push_frame(mem->temp);
 
         VkExtent2D surface_extent = get_surface_extent(vk);
 
@@ -310,20 +308,20 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk, App *app) {
 
         gfx->pipeline.direct = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
-        pop_frame(app->mem.temp);
+        pop_frame(mem->temp);
     }
 }
 
-static void init_swap_state(Graphics *gfx, Vulkan *vk, App *app) {
+static void init_swap_state(Graphics *gfx, Vulkan *vk, Memory *mem) {
     {
-        gfx->swap_state.framebufs = create_array<VkFramebuffer>(app->mem.fixed, vk->swapchain.image_count);
+        gfx->swap_state.framebufs = create_array<VkFramebuffer>(mem->fixed, vk->swapchain.image_count);
 
         // Create framebuffer for each swapchain image.
         for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
-            push_frame(app->mem.temp);
+            push_frame(mem->temp);
 
             FramebufferInfo info = {
-                .attachments = create_array<VkImageView>(app->mem.temp, 1),
+                .attachments = create_array<VkImageView>(mem->temp, 1),
                 .extent = get_surface_extent(vk),
                 .layers = 1,
             };
@@ -331,16 +329,16 @@ static void init_swap_state(Graphics *gfx, Vulkan *vk, App *app) {
             push(info.attachments, vk->swapchain.image_views[i]);
             push(gfx->swap_state.framebufs, create_framebuffer(vk->device, gfx->main_render_pass->handle, &info));
 
-            pop_frame(app->mem.temp);
+            pop_frame(mem->temp);
         }
     }
 
     gfx->swap_state.render_cmd_bufs = alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, vk->swapchain.image_count);
 }
 
-static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
+static void init_sync(Graphics *gfx, Memory *mem, Vulkan *vk, u32 frame_count) {
     gfx->sync.curr_frame_idx = U32_MAX;
-    gfx->sync.frames = create_array<Frame>(app->mem.fixed, frame_count);
+    gfx->sync.frames = create_array<Frame>(mem->fixed, frame_count);
 
     for (u32 i = 0; i < frame_count; ++i) {
         push(gfx->sync.frames, {
@@ -351,19 +349,19 @@ static void init_sync(Graphics *gfx, App *app, Vulkan *vk, u32 frame_count) {
     }
 }
 
-static Graphics *create_graphics(App *app, Vulkan *vk) {
-    Graphics *gfx = allocate<Graphics>(app->mem.fixed, 1);
+static Graphics *create_graphics(Memory *mem, Vulkan *vk) {
+    Graphics *gfx = allocate<Graphics>(mem->fixed, 1);
     alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1, &gfx->temp_cmd_buf);
     create_buffers(gfx, vk);
     gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64), 16);
     create_samplers(gfx, vk);
-    create_descriptor_sets(gfx, vk, app);
+    create_descriptor_sets(gfx, vk, mem);
     create_shaders(gfx, vk);
-    create_render_passes(gfx, vk, app);
-    create_pipelines(gfx, vk, app);
+    create_render_passes(gfx, vk, mem);
+    create_pipelines(gfx, vk, mem);
 
-    init_swap_state(gfx, vk, app);
-    init_sync(gfx, app, vk, 1);
+    init_swap_state(gfx, vk, mem);
+    init_sync(gfx, mem, vk, 1);
 
     return gfx;
 }
@@ -387,15 +385,15 @@ static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vert
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
-static void create_meshes(Test *test, App *app, Graphics *gfx, Vulkan *vk) {
+static void create_meshes(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
     {
-        auto vertexes = create_array<Vertex>(app->mem.fixed, 64);
+        auto vertexes = create_array<Vertex>(mem->fixed, 64);
         push(vertexes, { { -1, -1, 0 }, { 0, 0 } });
         push(vertexes, { { -1,  1, 0 }, { 0, 1 } });
         push(vertexes, { {  1,  1, 0 }, { 1, 1 } });
         push(vertexes, { {  1, -1, 0 }, { 1, 0 } });
 
-        auto indexes = create_array<u32>(app->mem.fixed, 6);
+        auto indexes = create_array<u32>(mem->fixed, 6);
         push(indexes, 0u);
         push(indexes, 2u);
         push(indexes, 1u);
@@ -478,8 +476,8 @@ static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static void create_uniform_buffers(Test *test, App *app, Graphics *gfx, Vulkan *vk) {
-    test->uniform_buffer.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
+static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
+    test->uniform_buffer.color = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
     for (u32 i = 0; i < vk->swapchain.image_count; ++i)
         test->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
 
@@ -515,11 +513,11 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static Test *create_test(App *app, Graphics *gfx, Vulkan *vk) {
-    auto test = allocate<Test>(app->mem.fixed, 1);
-    create_meshes(test, app, gfx, vk);
+static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk) {
+    auto test = allocate<Test>(mem->fixed, 1);
+    create_meshes(test, mem, gfx, vk);
     create_images(test, gfx, vk);
-    create_uniform_buffers(test, app, gfx, vk);
+    create_uniform_buffers(test, mem, gfx, vk);
     create_image_samplers(test, gfx);
     bind_descriptor_data(test, gfx, vk);
     return test;
@@ -629,14 +627,14 @@ static void present(Graphics *gfx, Vulkan *vk) {
 s32 main() {
     // Create App.
     Allocator *fixed_mem = create_stack_allocator(gigabyte(1));
-    auto app = allocate<App>(fixed_mem, 1);
-    app->mem.fixed = fixed_mem;
-    app->mem.temp = create_stack_allocator(app->mem.fixed, megabyte(1));
-    app->mem.platform = create_stack_allocator(app->mem.fixed, kilobyte(2));
-    app->mem.vulkan = create_stack_allocator(app->mem.fixed, megabyte(4));
+    auto mem = allocate<Memory>(fixed_mem, 1);
+    mem->fixed = fixed_mem;
+    mem->temp = create_stack_allocator(mem->fixed, megabyte(1));
+    mem->platform = create_stack_allocator(mem->fixed, kilobyte(2));
+    mem->vulkan = create_stack_allocator(mem->fixed, megabyte(4));
 
     // Create Modules
-    Platform *platform = create_platform(app->mem.platform, {
+    Platform *platform = create_platform(mem->platform, {
         .surface = {
             .x = 600,
             .y = 100,
@@ -646,7 +644,7 @@ s32 main() {
         .title = L"Renderer",
     });
 
-    Vulkan *vk = create_vulkan(app->mem.vulkan, platform, {
+    Vulkan *vk = create_vulkan(mem->vulkan, platform, {
         .max_buffers = 2,
         .max_regions = 32,
         .max_images = 16,
@@ -655,8 +653,8 @@ s32 main() {
         .max_pipelines = 8,
     });
 
-    Graphics *gfx = create_graphics(app, vk);
-    Test *test = create_test(app, gfx, vk);
+    Graphics *gfx = create_graphics(mem, vk);
+    Test *test = create_test(mem, gfx, vk);
     Vec3<f32> color = {};
 
     // Main Loop
