@@ -150,9 +150,12 @@ struct DescriptorInfo {
     VkShaderStageFlags stage;
 };
 
-union DescriptorBinding {
-    Region *uniform_buffer;
-    ImageSampler *image_sampler;
+struct DescriptorBinding {
+    VkDescriptorType type;
+    union {
+        Region *uniform_buffer;
+        ImageSampler *image_sampler;
+    };
 };
 
 struct PipelineInfo {
@@ -1051,42 +1054,41 @@ static VkDescriptorSet allocate_descriptor_set(Vulkan *vk, VkDescriptorPool pool
     return descriptor_set;
 };
 
-static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, u32 descriptor_count,
-                                  DescriptorInfo *descriptor_infos, DescriptorBinding *descriptor_bindings)
+static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set,
+                                  u32 binding_count, DescriptorBinding *bindings)
 {
     push_frame(vk->mem.temp);
 
-    auto buf_infos = create_array<VkDescriptorBufferInfo>(vk->mem.temp, descriptor_count);
-    auto img_infos = create_array<VkDescriptorImageInfo>(vk->mem.temp, descriptor_count);
-    auto writes = create_array<VkWriteDescriptorSet>(vk->mem.temp, descriptor_count);
+    auto buf_infos = create_array<VkDescriptorBufferInfo>(vk->mem.temp, binding_count);
+    auto img_infos = create_array<VkDescriptorImageInfo>(vk->mem.temp, binding_count);
+    auto writes = create_array<VkWriteDescriptorSet>(vk->mem.temp, binding_count);
 
-    for (u32 i = 0; i < descriptor_count; ++i) {
-        DescriptorInfo *descriptor_info = descriptor_infos + i;
-        DescriptorBinding *descriptor_binding = descriptor_bindings + i;
+    for (u32 i = 0; i < binding_count; ++i) {
+        DescriptorBinding *binding = bindings + i;
 
         VkWriteDescriptorSet *write = push(writes);
         write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write->dstSet = descriptor_set;
         write->dstBinding = i;
         write->dstArrayElement = 0;
-        write->descriptorCount = descriptor_info->count;
-        write->descriptorType = descriptor_info->type;
+        write->descriptorCount = 1;
+        write->descriptorType = binding->type;
 
-        if (descriptor_info->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
-            descriptor_info->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
-            descriptor_info->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        if (binding->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+            binding->type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
+            binding->type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
         {
             VkDescriptorBufferInfo *info = push(buf_infos);
-            info->buffer = descriptor_binding->uniform_buffer->buffer->handle;
-            info->offset = descriptor_binding->uniform_buffer->offset;
-            info->range = descriptor_binding->uniform_buffer->size;
+            info->buffer = binding->uniform_buffer->buffer->handle;
+            info->offset = binding->uniform_buffer->offset;
+            info->range = binding->uniform_buffer->size;
 
             write->pBufferInfo = info;
         }
-        else if (descriptor_info->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+        else if (binding->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
             VkDescriptorImageInfo *info = push(img_infos);
-            info->sampler = descriptor_binding->image_sampler->sampler;
-            info->imageView = descriptor_binding->image_sampler->image->view;
+            info->sampler = binding->image_sampler->sampler;
+            info->imageView = binding->image_sampler->image->view;
             info->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
             write->pImageInfo = info;

@@ -479,34 +479,39 @@ static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_uniform_buffers(Test *test, App *app, Graphics *gfx, Vulkan *vk) {
-    // Color
-    {
-        test->uniform_buffer.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i)
-            test->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
+    test->uniform_buffer.color = create_array<Region *>(app->mem.fixed, vk->swapchain.image_count);
+    for (u32 i = 0; i < vk->swapchain.image_count; ++i)
+        test->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
 
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-            DescriptorBinding descriptor_bindings[] = {
-                { .uniform_buffer = test->uniform_buffer.color->data[i] },
-            };
-
-            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(descriptor_infos),
-                                  descriptor_infos, descriptor_bindings);
-        }
-    }
 }
 
-static void create_image_samplers(Test *test, Graphics *gfx, Vulkan *vk) {
-    // Test
-    {
-        test->image_sampler.test = { gfx->image.test, gfx->sampler.test };
+static void create_image_samplers(Test *test, Graphics *gfx) {
+    test->image_sampler.test = { test->image.test, gfx->sampler.test };
+}
 
-        DescriptorBinding descriptor_bindings[] = {
-            { .image_sampler = &test->image_sampler.test },
+static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
+    {
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+            DescriptorBinding bindings[] = {
+                {
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    .uniform_buffer = test->uniform_buffer.color->data[i]
+                },
+            };
+
+            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(bindings), bindings);
+        }
+    }
+
+    {
+        DescriptorBinding bindings[] = {
+            {
+                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .image_sampler = &test->image_sampler.test
+            },
         };
 
-        update_descriptor_set(vk, gfx->descriptor_set.sampler, CTK_ARRAY_SIZE(descriptor_infos),
-                              descriptor_infos, descriptor_bindings);
+        update_descriptor_set(vk, gfx->descriptor_set.sampler, CTK_ARRAY_SIZE(bindings), bindings);
     }
 }
 
@@ -515,7 +520,8 @@ static Test *create_test(App *app, Graphics *gfx, Vulkan *vk) {
     create_meshes(test, app, gfx, vk);
     create_images(test, gfx, vk);
     create_uniform_buffers(test, app, gfx, vk);
-    create_image_samplers(test, gfx, vk);
+    create_image_samplers(test, gfx);
+    bind_descriptor_data(test, gfx, vk);
     return test;
 }
 
@@ -533,11 +539,11 @@ static void next_frame(Graphics *gfx, Vulkan *vk) {
     gfx->sync.swap_img_idx = next_swap_img_idx(vk, gfx->sync.frame->img_aquired, VK_NULL_HANDLE);
 }
 
-static void update_render_state(Graphics *gfx, Vulkan *vk, Vec3<f32> *color) {
+static void update_render_state(Graphics *gfx, Vulkan *vk, Test *test, Vec3<f32> *color) {
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, gfx->temp_cmd_buf,
                                gfx->staging_region, 0,
-                               gfx->uniform_buffer.color->data[gfx->sync.swap_img_idx], 0,
+                               test->uniform_buffer.color->data[gfx->sync.swap_img_idx], 0,
                                color, sizeof(*color));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
@@ -573,7 +579,7 @@ static void render(Graphics *gfx, Vulkan *vk, Test *test) {
                                 0, NULL);
 
         // Bind mesh data.
-        Mesh *mesh = &test->mesh.test;
+        Mesh *mesh = &test->mesh.quad;
         vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
         vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
                              VK_INDEX_TYPE_UINT32);
@@ -672,8 +678,8 @@ s32 main() {
 
         // Rendering
         next_frame(gfx, vk);
-        update_render_state(gfx, vk, &color);
-        render(gfx, vk);
+        update_render_state(gfx, vk, test, &color);
+        render(gfx, vk, test);
         present(gfx, vk);
     }
 
