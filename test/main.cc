@@ -1,6 +1,11 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
-#include "stb/stb_image.h"
+#include <stb/stb_image.h>
+
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "renderer/platform.h"
 #include "renderer/vulkan.h"
@@ -10,6 +15,48 @@
 #include "ctk/math.h"
 
 using namespace ctk;
+
+#define USE_GLM
+
+namespace test {
+#ifdef USE_GLM
+    using Matrix = glm::mat4;
+
+    template<typename Type>
+    using Vec3 = glm::vec3;
+
+    Matrix perspective(f32 fov, f32 aspect_ratio, f32 z_near, f32 z_far) {
+        return glm::perspective(fov, aspect_ratio, z_near, z_far);
+    }
+
+    f32 radians(f32 degrees) {
+        return glm::radians(degrees);
+    }
+
+    Matrix rotate(Matrix matrix, f32 degrees, Axis axis) {
+        if (axis == Axis::X) return glm::rotate(matrix, radians(degrees), { 1, 0, 0 });
+        if (axis == Axis::Y) return glm::rotate(matrix, radians(degrees), { 0, 1, 0 });
+        if (axis == Axis::Z) return glm::rotate(matrix, radians(degrees), { 0, 0, 1 });
+    }
+
+    Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
+        return glm::translate(matrix, { x, y, z });
+    }
+#else
+    using Matrix = ctk::Matrix;
+
+    template<typename Type>
+    using Vec3 = ctk::Vec3<Type>;
+
+    Matrix perspective(f32 fov, f32 aspect_ratio, f32 z_near, f32 z_far) {
+        return ctk::perspective(fov, aspect_ratio, z_near, z_far);
+    }
+
+    Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
+        return ctk::translate(Matrix, x, y, z);
+    }
+#endif
+}
 
 struct Memory {
     Allocator *fixed;
@@ -31,6 +78,15 @@ struct Mesh {
     Region *index_region;
 };
 
+struct View {
+    f32 fov;
+    f32 aspect;
+    f32 z_near;
+    f32 z_far;
+    test::Vec3<f32> position;
+    test::Vec3<f32> rotation;
+};
+
 struct Test {
     struct {
         Mesh quad;
@@ -42,6 +98,7 @@ struct Test {
 
     struct {
         Array<Region *> *color;
+        Array<Region *> *matrix;
     } uniform_buffer;
 
     struct {
@@ -54,6 +111,7 @@ struct Test {
     } pipeline;
 
     Vec3<f32> color;
+    View view;
 };
 
 static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
@@ -171,6 +229,9 @@ static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulka
     for (u32 i = 0; i < vk->swapchain.image_count; ++i)
         test->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
 
+    test->uniform_buffer.matrix = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
+    for (u32 i = 0; i < vk->swapchain.image_count; ++i)
+        test->uniform_buffer.matrix->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 64);
 }
 
 static void create_image_samplers(Test *test, Graphics *gfx) {
@@ -192,14 +253,20 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
     }
 
     {
-        DescriptorBinding bindings[] = {
-            {
-                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .image_sampler = &test->image_sampler.test
-            },
-        };
+        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+            DescriptorBinding bindings[] = {
+                {
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    .uniform_buffer = test->uniform_buffer.matrix->data[i]
+                },
+                {
+                    .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    .image_sampler = &test->image_sampler.test
+                },
+            };
 
-        update_descriptor_set(vk, gfx->descriptor_set.sampler, CTK_ARRAY_SIZE(bindings), bindings);
+            update_descriptor_set(vk, gfx->descriptor_set.sampler->data[i], CTK_ARRAY_SIZE(bindings), bindings);
+        }
     }
 }
 
@@ -210,6 +277,16 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk) {
     create_uniform_buffers(test, mem, gfx, vk);
     create_image_samplers(test, gfx);
     bind_descriptor_data(test, gfx, vk);
+
+    test->view = {
+        .fov = 90,
+        .aspect = (f32)vk->swapchain.extent.width / vk->swapchain.extent.height,
+        .z_near = 0.1f,
+        .z_far = 100,
+        .position = { 0, 0, -1 },
+        .rotation = { 0, 0, 0 },
+    };
+
     return test;
 }
 
@@ -219,12 +296,40 @@ static void handle_input(Test *test, Platform *platform) {
         return;
     }
 
-         if (key_down(platform, InputKey::Q)) test->color = { 1, 0.5f, 0.5f };
-    else if (key_down(platform, InputKey::W)) test->color = { 0.5f, 1, 0.5f };
-    else if (key_down(platform, InputKey::E)) test->color = { 0.5f, 0.5f, 1 };
+    if (key_down(platform, InputKey::D)) test->view.position.x += 0.01f;
+    if (key_down(platform, InputKey::A)) test->view.position.x -= 0.01f;
+    if (key_down(platform, InputKey::E)) test->view.position.y -= 0.01f;
+    if (key_down(platform, InputKey::Q)) test->view.position.y += 0.01f;
+    if (key_down(platform, InputKey::W)) test->view.position.z += 0.01f;
+    if (key_down(platform, InputKey::S)) test->view.position.z -= 0.01f;
+
+    if (key_down(platform, InputKey::UP))    test->view.rotation.x += 0.1f;
+    if (key_down(platform, InputKey::DOWN))  test->view.rotation.x -= 0.1f;
+    if (key_down(platform, InputKey::RIGHT)) test->view.rotation.y -= 0.1f;
+    if (key_down(platform, InputKey::LEFT))  test->view.rotation.y += 0.1f;
+
+         if (key_down(platform, InputKey::Z)) test->color = { 1, 0.5f, 0.5f };
+    else if (key_down(platform, InputKey::X)) test->color = { 0.5f, 1, 0.5f };
+    else if (key_down(platform, InputKey::C)) test->color = { 0.5f, 0.5f, 1 };
 
          if (key_down(platform, InputKey::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
     else if (key_down(platform, InputKey::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
+}
+
+static test::Matrix calculate_view_space_matrix(View *view) {
+    // View Matrix
+    test::Matrix model_matrix(1.0f);
+    model_matrix = test::rotate(model_matrix, view->rotation.x, Axis::X);
+    model_matrix = test::rotate(model_matrix, view->rotation.y, Axis::Y);
+    model_matrix = test::rotate(model_matrix, view->rotation.z, Axis::Z);
+    test::Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    test::Matrix view_matrix = glm::lookAt(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
+
+    // Projection Matrix
+    test::Matrix projection_matrix = test::perspective(test::radians(view->fov), view->aspect, view->z_near, view->z_far);
+    projection_matrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
+
+    return projection_matrix * view_matrix;
 }
 
 static void update_render_state(Graphics *gfx, Vulkan *vk, Test *test) {
@@ -233,6 +338,13 @@ static void update_render_state(Graphics *gfx, Vulkan *vk, Test *test) {
                                gfx->staging_region, 0,
                                test->uniform_buffer.color->data[gfx->sync.swap_img_idx], 0,
                                &test->color, sizeof(test->color));
+
+        test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+
+        write_to_device_region(vk, gfx->temp_cmd_buf,
+                               gfx->staging_region, sizeof(test->color),
+                               test->uniform_buffer.matrix->data[gfx->sync.swap_img_idx], 0,
+                               &view_space_matrix, sizeof(view_space_matrix));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
@@ -272,7 +384,7 @@ static void render(Graphics *gfx, Vulkan *vk, Test *test) {
 
             // Bind descriptor sets.
             VkDescriptorSet descriptor_sets[] = {
-                gfx->descriptor_set.sampler,
+                gfx->descriptor_set.sampler->data[gfx->sync.swap_img_idx],
             };
 
             vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.sampler->layout,

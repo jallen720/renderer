@@ -45,7 +45,7 @@ struct Graphics {
 
     struct {
         Array<VkDescriptorSet> *color;
-        VkDescriptorSet sampler;
+        Array<VkDescriptorSet> *sampler;
     } descriptor_set;
 
     struct {
@@ -124,7 +124,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
     // Pool
     gfx->descriptor_pool = create_descriptor_pool(vk, {
         .descriptor_count = {
-            .uniform_buffer = 4,
+            .uniform_buffer = 8,
             // .uniform_buffer_dynamic = 4,
             .combined_image_sampler = 4,
             // .input_attachment = 4,
@@ -149,14 +149,16 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
     // Sampler
     {
         DescriptorInfo descriptor_infos[] = {
-            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT }
+            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         VK_SHADER_STAGE_VERTEX_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         };
 
         gfx->descriptor_set_layout.sampler = create_descriptor_set_layout(vk, descriptor_infos,
                                                                           CTK_ARRAY_SIZE(descriptor_infos));
 
+        gfx->descriptor_set.sampler = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
         allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.sampler,
-                                 1, &gfx->descriptor_set.sampler);
+                                 vk->swapchain.image_count, gfx->descriptor_set.sampler->data);
     }
 }
 

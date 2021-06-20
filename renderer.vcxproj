@@ -78,7 +78,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(dev_path)\lib;$(dev_path)\lib\VulkanSDK\1.2.162.1\Include;$(dev_path)\pro;$(IncludePath)</IncludePath>
+    <IncludePath>$(dev_path)\lib;$(dev_path)\lib\VulkanSDK\1.2.162.1\Include;$(dev_path)\lib\glm;$(dev_path)\pro;$(IncludePath)</IncludePath>
     <LibraryPath>$(dev_path)\lib\VulkanSDK\1.2.162.1\Lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
