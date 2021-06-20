@@ -106,8 +106,8 @@ struct Test {
     } image_sampler;
 
     enum struct Pipeline {
-        COLOR,
         SAMPLER,
+        COLOR,
     } pipeline;
 
     Vec3<f32> color;
@@ -135,19 +135,59 @@ static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vert
 
 static void create_meshes(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
     {
-        auto vertexes = create_array<Vertex>(mem->fixed, 64);
-        push(vertexes, { { -1, -1, 0 }, { 0, 0 } });
-        push(vertexes, { { -1,  1, 0 }, { 0, 1 } });
-        push(vertexes, { {  1,  1, 0 }, { 1, 1 } });
-        push(vertexes, { {  1, -1, 0 }, { 1, 0 } });
+        auto vertexes = create_array<Vertex>(mem->fixed, 8);
+        push(vertexes, { { -1,-1,-1 }, { 0, 0 } });
+        push(vertexes, { { -1, 1,-1 }, { 0, 1 } });
+        push(vertexes, { {  1, 1,-1 }, { 1, 1 } });
+        push(vertexes, { {  1,-1,-1 }, { 1, 0 } });
 
-        auto indexes = create_array<u32>(mem->fixed, 6);
+        push(vertexes, { {  1,-1, 1 }, { 0, 0 } });
+        push(vertexes, { {  1, 1, 1 }, { 0, 1 } });
+        push(vertexes, { { -1, 1, 1 }, { 1, 1 } });
+        push(vertexes, { { -1,-1, 1 }, { 1, 0 } });
+
+        auto indexes = create_array<u32>(mem->fixed, 36);
         push(indexes, 0u);
         push(indexes, 2u);
         push(indexes, 1u);
         push(indexes, 0u);
         push(indexes, 3u);
         push(indexes, 2u);
+
+        push(indexes, 3u);
+        push(indexes, 5u);
+        push(indexes, 2u);
+        push(indexes, 3u);
+        push(indexes, 4u);
+        push(indexes, 5u);
+
+        push(indexes, 4u);
+        push(indexes, 6u);
+        push(indexes, 5u);
+        push(indexes, 4u);
+        push(indexes, 7u);
+        push(indexes, 6u);
+
+        push(indexes, 7u);
+        push(indexes, 1u);
+        push(indexes, 6u);
+        push(indexes, 7u);
+        push(indexes, 0u);
+        push(indexes, 1u);
+
+        push(indexes, 7u);
+        push(indexes, 3u);
+        push(indexes, 0u);
+        push(indexes, 7u);
+        push(indexes, 4u);
+        push(indexes, 3u);
+
+        push(indexes, 1u);
+        push(indexes, 5u);
+        push(indexes, 6u);
+        push(indexes, 1u);
+        push(indexes, 2u);
+        push(indexes, 5u);
 
         init_mesh(&test->mesh.quad, gfx, vk, vertexes, indexes);
     }
@@ -283,7 +323,7 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk) {
         .aspect = (f32)vk->swapchain.extent.width / vk->swapchain.extent.height,
         .z_near = 0.1f,
         .z_far = 100,
-        .position = { 0, 0, -1 },
+        .position = { 0, 0, -2 },
         .rotation = { 0, 0, 0 },
     };
 
@@ -296,17 +336,31 @@ static void handle_input(Test *test, Platform *platform) {
         return;
     }
 
-    if (key_down(platform, InputKey::D)) test->view.position.x += 0.01f;
-    if (key_down(platform, InputKey::A)) test->view.position.x -= 0.01f;
-    if (key_down(platform, InputKey::E)) test->view.position.y -= 0.01f;
-    if (key_down(platform, InputKey::Q)) test->view.position.y += 0.01f;
-    if (key_down(platform, InputKey::W)) test->view.position.z += 0.01f;
-    if (key_down(platform, InputKey::S)) test->view.position.z -= 0.01f;
+    f32 mod = key_down(platform, InputKey::SHIFT) ? 2 : 1;
 
-    if (key_down(platform, InputKey::UP))    test->view.rotation.x += 0.1f;
-    if (key_down(platform, InputKey::DOWN))  test->view.rotation.x -= 0.1f;
-    if (key_down(platform, InputKey::RIGHT)) test->view.rotation.y -= 0.1f;
-    if (key_down(platform, InputKey::LEFT))  test->view.rotation.y += 0.1f;
+    test::Vec3<f32> move_vec(0);
+
+    if (key_down(platform, InputKey::D)) move_vec.x += 0.01f * mod;
+    if (key_down(platform, InputKey::A)) move_vec.x -= 0.01f * mod;
+    if (key_down(platform, InputKey::E)) move_vec.y -= 0.01f * mod;
+    if (key_down(platform, InputKey::Q)) move_vec.y += 0.01f * mod;
+    if (key_down(platform, InputKey::W)) move_vec.z += 0.01f * mod;
+    if (key_down(platform, InputKey::S)) move_vec.z -= 0.01f * mod;
+
+    test::Matrix model_matrix(1.0f);
+    model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
+    model_matrix = test::rotate(model_matrix, test->view.rotation.y, Axis::Y);
+    model_matrix = test::rotate(model_matrix, test->view.rotation.z, Axis::Z);
+    test::Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    test::Vec3<f32> right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
+    test->view.position += move_vec.z * forward;
+    test->view.position += move_vec.x * right;
+    test->view.position.y += move_vec.y;
+
+    if (key_down(platform, InputKey::UP))    test->view.rotation.x += 0.2f;
+    if (key_down(platform, InputKey::DOWN))  test->view.rotation.x -= 0.2f;
+    if (key_down(platform, InputKey::RIGHT)) test->view.rotation.y -= 0.2f;
+    if (key_down(platform, InputKey::LEFT))  test->view.rotation.y += 0.2f;
 
          if (key_down(platform, InputKey::Z)) test->color = { 1, 0.5f, 0.5f };
     else if (key_down(platform, InputKey::X)) test->color = { 0.5f, 1, 0.5f };
