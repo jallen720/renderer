@@ -112,6 +112,11 @@ struct Test {
 
     Vec3<f32> color;
     View view;
+
+    struct {
+        Vec2<s32> last_mouse_position;
+        Vec2<s32> mouse_delta;
+    } input;
 };
 
 static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
@@ -310,7 +315,7 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk) {
+static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platform) {
     auto test = allocate<Test>(mem->fixed, 1);
     create_meshes(test, mem, gfx, vk);
     create_images(test, gfx, vk);
@@ -327,25 +332,22 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk) {
         .rotation = { 0, 0, 0 },
     };
 
+    test->input.last_mouse_position = get_mouse_position(platform);
     return test;
 }
 
-static void handle_input(Test *test, Platform *platform) {
-    if (key_down(platform, InputKey::ESCAPE)) {
-        platform->window->open = false;
-        return;
-    }
-
+static void camera_controls(Test *test, Platform *platform) {
+    // Translation
+    static constexpr f32 TRANSLATION_SPEED = 0.05f;
     f32 mod = key_down(platform, InputKey::SHIFT) ? 2 : 1;
-
     test::Vec3<f32> move_vec(0);
 
-    if (key_down(platform, InputKey::D)) move_vec.x += 0.01f * mod;
-    if (key_down(platform, InputKey::A)) move_vec.x -= 0.01f * mod;
-    if (key_down(platform, InputKey::E)) move_vec.y -= 0.01f * mod;
-    if (key_down(platform, InputKey::Q)) move_vec.y += 0.01f * mod;
-    if (key_down(platform, InputKey::W)) move_vec.z += 0.01f * mod;
-    if (key_down(platform, InputKey::S)) move_vec.z -= 0.01f * mod;
+    if (key_down(platform, InputKey::D)) move_vec.x += TRANSLATION_SPEED * mod;
+    if (key_down(platform, InputKey::A)) move_vec.x -= TRANSLATION_SPEED * mod;
+    if (key_down(platform, InputKey::E)) move_vec.y -= TRANSLATION_SPEED * mod;
+    if (key_down(platform, InputKey::Q)) move_vec.y += TRANSLATION_SPEED * mod;
+    if (key_down(platform, InputKey::W)) move_vec.z += TRANSLATION_SPEED * mod;
+    if (key_down(platform, InputKey::S)) move_vec.z -= TRANSLATION_SPEED * mod;
 
     test::Matrix model_matrix(1.0f);
     model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
@@ -357,10 +359,26 @@ static void handle_input(Test *test, Platform *platform) {
     test->view.position += move_vec.x * right;
     test->view.position.y += move_vec.y;
 
-    if (key_down(platform, InputKey::UP))    test->view.rotation.x += 0.2f;
-    if (key_down(platform, InputKey::DOWN))  test->view.rotation.x -= 0.2f;
-    if (key_down(platform, InputKey::RIGHT)) test->view.rotation.y -= 0.2f;
-    if (key_down(platform, InputKey::LEFT))  test->view.rotation.y += 0.2f;
+    // Rotation
+    static constexpr f32 ROTATION_SPEED = 0.2f;
+    test->view.rotation.x += test->input.mouse_delta.y * ROTATION_SPEED;
+    test->view.rotation.y -= test->input.mouse_delta.x * ROTATION_SPEED;
+}
+
+static void update_mouse_delta(Test *test, Platform *platform) {
+    Vec2<s32> mouse_position = get_mouse_position(platform);
+    test->input.mouse_delta = mouse_position - test->input.last_mouse_position;
+    test->input.last_mouse_position = mouse_position;
+}
+
+static void handle_input(Test *test, Platform *platform) {
+    if (key_down(platform, InputKey::ESCAPE)) {
+        platform->window->open = false;
+        return;
+    }
+
+    update_mouse_delta(test, platform);
+    camera_controls(test, platform);
 
          if (key_down(platform, InputKey::Z)) test->color = { 1, 0.5f, 0.5f };
     else if (key_down(platform, InputKey::X)) test->color = { 0.5f, 1, 0.5f };
@@ -489,7 +507,7 @@ s32 main() {
     });
 
     Graphics *gfx = create_graphics(mem->graphics, vk);
-    Test *test = create_test(mem, gfx, vk);
+    Test *test = create_test(mem, gfx, vk, platform);
 
     // Main Loop
     while (1) {

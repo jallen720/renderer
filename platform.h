@@ -51,7 +51,6 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
     if (instance && instance->window->handle == hwnd) {
         switch (msg) {
             case WM_QUIT: {
-                print_line("WM_QUIT");
                 break;
             }
             case WM_DESTROY: {
@@ -67,22 +66,18 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
                 break;
             }
             case WM_KEYDOWN: {
-                print_line("WM_KEYDOWN");
                 instance->window->key_down[w_param] = true;
                 break;
             }
             case WM_KEYUP: {
-                print_line("WM_KEYUP");
                 instance->window->key_down[w_param] = false;
                 break;
             }
             case WM_SYSKEYDOWN: {
-                print_line("WM_SYSKEYDOWN");
                 instance->window->key_down[w_param] = true;
                 break; // System keys should still be processed via DefWindowProc().
             }
             case WM_SYSKEYUP: {
-                print_line("WM_SYSKEYUP");
                 instance->window->key_down[w_param] = false;
                 break; // System keys should still be processed via DefWindowProc().
             }
@@ -165,4 +160,16 @@ static void process_events(Window *window) {
 
 static bool key_down(Platform *platform, InputKey key) {
     return platform->window->key_down[platform->key_map[(s32)key]];
+}
+
+static Vec2<s32> get_mouse_position(Platform *platform) {
+    POINT mouse_position = {};
+
+    if (!GetCursorPos(&mouse_position))
+        CTK_FATAL("GetCursorPos error: %u", GetLastError());
+
+    if (!ScreenToClient(platform->window->handle, &mouse_position))
+        CTK_FATAL("ScreenToClient error: %u", GetLastError());
+
+    return { mouse_position.x, mouse_position.y };
 }
