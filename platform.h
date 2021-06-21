@@ -173,3 +173,21 @@ static Vec2<s32> get_mouse_position(Platform *platform) {
 
     return { mouse_position.x, mouse_position.y };
 }
+
+static void set_mouse_position(Platform *platform, Vec2<s32> position) {
+    POINT p = { position.x, position.y };
+
+    if (!ClientToScreen(platform->window->handle, &p))
+        CTK_FATAL("ClientToScreen error: %u", GetLastError());
+
+    if (!SetCursorPos(p.x, p.y))
+        CTK_FATAL("GetCursorPos error: %u", GetLastError());
+}
+
+static void set_mouse_visible(bool visible) {
+    ShowCursor(visible);
+}
+
+static bool window_is_active(Window *window) {
+    return GetActiveWindow() == window->handle;
+}

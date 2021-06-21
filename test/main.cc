@@ -360,24 +360,59 @@ static void camera_controls(Test *test, Platform *platform) {
     test->view.position.y += move_vec.y;
 
     // Rotation
-    static constexpr f32 ROTATION_SPEED = 0.2f;
-    test->view.rotation.x += test->input.mouse_delta.y * ROTATION_SPEED;
-    test->view.rotation.y -= test->input.mouse_delta.x * ROTATION_SPEED;
+    // if (key_down(platform, InputKey::MOUSE_0)) print_line("0");
+    // if (key_down(platform, InputKey::MOUSE_1)) print_line("1");
+    // if (key_down(platform, InputKey::MOUSE_2)) print_line("2");
+    // if (key_down(platform, InputKey::MOUSE_3)) print_line("3");
+    // if (key_down(platform, InputKey::MOUSE_4)) print_line("4");
+    // if (key_down(platform, InputKey::MOUSE_2)) {
+        static constexpr f32 ROTATION_SPEED = 0.2f;
+        test->view.rotation.x += test->input.mouse_delta.y * ROTATION_SPEED;
+        test->view.rotation.y -= test->input.mouse_delta.x * ROTATION_SPEED;
+    // }
 }
 
-static void update_mouse_delta(Test *test, Platform *platform) {
+static void update_mouse_delta(Test *test, Platform *platform, Vulkan *vk) {
     Vec2<s32> mouse_position = get_mouse_position(platform);
     test->input.mouse_delta = mouse_position - test->input.last_mouse_position;
+
+    // Wrap mouse to window.
+    bool wrapped = false;
+
+    if (mouse_position.x < 0) {
+        mouse_position.x += vk->swapchain.extent.width;
+        wrapped = true;
+    }
+
+    if (mouse_position.y < 0) {
+        mouse_position.y += vk->swapchain.extent.height;
+        wrapped = true;
+    }
+
+    if (mouse_position.x >= vk->swapchain.extent.width) {
+        mouse_position.x -= vk->swapchain.extent.width;
+        wrapped = true;
+    }
+
+    if (mouse_position.y >= vk->swapchain.extent.height) {
+        mouse_position.y -= vk->swapchain.extent.height;
+        wrapped = true;
+    }
+
+    if (wrapped) {
+        set_mouse_position(platform, mouse_position);
+    }
+
     test->input.last_mouse_position = mouse_position;
 }
 
-static void handle_input(Test *test, Platform *platform) {
+static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     if (key_down(platform, InputKey::ESCAPE)) {
         platform->window->open = false;
         return;
     }
 
-    update_mouse_delta(test, platform);
+    update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
          if (key_down(platform, InputKey::Z)) test->color = { 1, 0.5f, 0.5f };
@@ -496,6 +531,7 @@ s32 main() {
         },
         .title = L"Renderer",
     });
+    set_mouse_visible(false);
 
     Vulkan *vk = create_vulkan(mem->vulkan, platform, {
         .max_buffers = 2,
@@ -513,11 +549,14 @@ s32 main() {
     while (1) {
         process_events(platform->window);
 
+        if (!window_is_active(platform->window))
+            continue;
+
         // Quit event closed the window.
         if (!platform->window->open)
             break;
 
-        handle_input(test, platform);
+        handle_input(test, platform, vk);
 
         // Input closed the window.
         if (!platform->window->open)
