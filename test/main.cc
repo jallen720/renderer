@@ -85,6 +85,7 @@ struct View {
     f32 z_far;
     test::Vec3<f32> position;
     test::Vec3<f32> rotation;
+    f32 max_x_angle;
 };
 
 struct Test {
@@ -330,24 +331,61 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
         .z_far = 100,
         .position = { 0, 0, -2 },
         .rotation = { 0, 0, 0 },
+        .max_x_angle = 89,
     };
 
     test->input.last_mouse_position = get_mouse_position(platform);
     return test;
 }
 
+static bool wrap_mouse_position(Vec2<s32> *mouse_position, u32 max_width, u32 max_height) {
+    bool wrapped = false;
+
+    if (mouse_position->x < 0) {
+        mouse_position->x += max_width;
+        wrapped = true;
+    }
+
+    if (mouse_position->y < 0) {
+        mouse_position->y += max_height;
+        wrapped = true;
+    }
+
+    if (mouse_position->x >= max_width) {
+        mouse_position->x -= max_width;
+        wrapped = true;
+    }
+
+    if (mouse_position->y >= max_height) {
+        mouse_position->y -= max_height;
+        wrapped = true;
+    }
+
+    return wrapped;
+}
+
+static void update_mouse_delta(Test *test, Platform *platform, Vulkan *vk) {
+    Vec2<s32> mouse_position = get_mouse_position(platform);
+    test->input.mouse_delta = mouse_position - test->input.last_mouse_position;
+
+    // if (wrap_mouse_position(&mouse_position, vk->swapchain.extent.width, vk->swapchain.extent.height))
+    //     set_mouse_position(platform, mouse_position);
+
+    test->input.last_mouse_position = mouse_position;
+}
+
 static void camera_controls(Test *test, Platform *platform) {
     // Translation
     static constexpr f32 TRANSLATION_SPEED = 0.05f;
-    f32 mod = key_down(platform, InputKey::SHIFT) ? 2 : 1;
+    f32 mod = key_down(platform, Key::SHIFT) ? 2 : 1;
     test::Vec3<f32> move_vec(0);
 
-    if (key_down(platform, InputKey::D)) move_vec.x += TRANSLATION_SPEED * mod;
-    if (key_down(platform, InputKey::A)) move_vec.x -= TRANSLATION_SPEED * mod;
-    if (key_down(platform, InputKey::E)) move_vec.y -= TRANSLATION_SPEED * mod;
-    if (key_down(platform, InputKey::Q)) move_vec.y += TRANSLATION_SPEED * mod;
-    if (key_down(platform, InputKey::W)) move_vec.z += TRANSLATION_SPEED * mod;
-    if (key_down(platform, InputKey::S)) move_vec.z -= TRANSLATION_SPEED * mod;
+    if (key_down(platform, Key::D)) move_vec.x += TRANSLATION_SPEED * mod;
+    if (key_down(platform, Key::A)) move_vec.x -= TRANSLATION_SPEED * mod;
+    if (key_down(platform, Key::E)) move_vec.y -= TRANSLATION_SPEED * mod;
+    if (key_down(platform, Key::Q)) move_vec.y += TRANSLATION_SPEED * mod;
+    if (key_down(platform, Key::W)) move_vec.z += TRANSLATION_SPEED * mod;
+    if (key_down(platform, Key::S)) move_vec.z -= TRANSLATION_SPEED * mod;
 
     test::Matrix model_matrix(1.0f);
     model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
@@ -360,54 +398,16 @@ static void camera_controls(Test *test, Platform *platform) {
     test->view.position.y += move_vec.y;
 
     // Rotation
-    // if (key_down(platform, InputKey::MOUSE_0)) print_line("0");
-    // if (key_down(platform, InputKey::MOUSE_1)) print_line("1");
-    // if (key_down(platform, InputKey::MOUSE_2)) print_line("2");
-    // if (key_down(platform, InputKey::MOUSE_3)) print_line("3");
-    // if (key_down(platform, InputKey::MOUSE_4)) print_line("4");
-    // if (key_down(platform, InputKey::MOUSE_2)) {
+    if (mouse_button_down(platform, 1)) {
         static constexpr f32 ROTATION_SPEED = 0.2f;
         test->view.rotation.x += test->input.mouse_delta.y * ROTATION_SPEED;
         test->view.rotation.y -= test->input.mouse_delta.x * ROTATION_SPEED;
-    // }
-}
-
-static void update_mouse_delta(Test *test, Platform *platform, Vulkan *vk) {
-    Vec2<s32> mouse_position = get_mouse_position(platform);
-    test->input.mouse_delta = mouse_position - test->input.last_mouse_position;
-
-    // Wrap mouse to window.
-    bool wrapped = false;
-
-    if (mouse_position.x < 0) {
-        mouse_position.x += vk->swapchain.extent.width;
-        wrapped = true;
+        test->view.rotation.x = clamp(test->view.rotation.x, -test->view.max_x_angle, test->view.max_x_angle);
     }
-
-    if (mouse_position.y < 0) {
-        mouse_position.y += vk->swapchain.extent.height;
-        wrapped = true;
-    }
-
-    if (mouse_position.x >= vk->swapchain.extent.width) {
-        mouse_position.x -= vk->swapchain.extent.width;
-        wrapped = true;
-    }
-
-    if (mouse_position.y >= vk->swapchain.extent.height) {
-        mouse_position.y -= vk->swapchain.extent.height;
-        wrapped = true;
-    }
-
-    if (wrapped) {
-        set_mouse_position(platform, mouse_position);
-    }
-
-    test->input.last_mouse_position = mouse_position;
 }
 
 static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
-    if (key_down(platform, InputKey::ESCAPE)) {
+    if (key_down(platform, Key::ESCAPE)) {
         platform->window->open = false;
         return;
     }
@@ -415,12 +415,12 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
-         if (key_down(platform, InputKey::Z)) test->color = { 1, 0.5f, 0.5f };
-    else if (key_down(platform, InputKey::X)) test->color = { 0.5f, 1, 0.5f };
-    else if (key_down(platform, InputKey::C)) test->color = { 0.5f, 0.5f, 1 };
+         if (key_down(platform, Key::Z)) test->color = { 1, 0.5f, 0.5f };
+    else if (key_down(platform, Key::X)) test->color = { 0.5f, 1, 0.5f };
+    else if (key_down(platform, Key::C)) test->color = { 0.5f, 0.5f, 1 };
 
-         if (key_down(platform, InputKey::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
-    else if (key_down(platform, InputKey::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
+         if (key_down(platform, Key::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
+    else if (key_down(platform, Key::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
 }
 
 static test::Matrix calculate_view_space_matrix(View *view) {
@@ -531,7 +531,6 @@ s32 main() {
         },
         .title = L"Renderer",
     });
-    set_mouse_visible(false);
 
     Vulkan *vk = create_vulkan(mem->vulkan, platform, {
         .max_buffers = 2,

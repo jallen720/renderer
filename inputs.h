@@ -1,4 +1,4 @@
-enum struct InputKey {
+enum struct Key {
     NUM_0,
     NUM_1,
     NUM_2,

@@ -27,14 +27,15 @@ struct WindowInfo {
 struct Window {
     HWND handle;
     bool open;
-    bool key_down[(s32)InputKey::COUNT];
+    bool key_down[(s32)Key::COUNT];
+    bool mouse_button_down[5];
 };
 
 struct Platform {
     Allocator *module_mem;
     HINSTANCE instance;
     Window *window;
-    s32 key_map[(s32)InputKey::COUNT];
+    s32 key_map[(s32)Key::COUNT];
 };
 
 static Platform *instance;
@@ -47,9 +48,22 @@ static Platform *instance;
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
+#define mouse_button_handlers(name, num) \
+    case WM_ ## name ## DOWN: { \
+        print_line(#name " DOWN"); \
+        instance->window->mouse_button_down[num] = true; \
+        break; \
+    } \
+    case WM_ ## name ## UP: { \
+        print_line(#name " UP"); \
+        instance->window->mouse_button_down[num] = false; \
+        break; \
+    }
+
 static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPARAM w_param, _In_ LPARAM l_param) {
     if (instance && instance->window->handle == hwnd) {
         switch (msg) {
+            // Window Events
             case WM_QUIT: {
                 break;
             }
@@ -65,6 +79,8 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
                 EndPaint(hwnd, &paint_struct);
                 break;
             }
+
+            // Key Events
             case WM_KEYDOWN: {
                 instance->window->key_down[w_param] = true;
                 break;
@@ -75,11 +91,24 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
             }
             case WM_SYSKEYDOWN: {
                 instance->window->key_down[w_param] = true;
-                break; // System keys should still be processed via DefWindowProc().
+                break; // System inputs should still be processed via DefWindowProc().
             }
             case WM_SYSKEYUP: {
                 instance->window->key_down[w_param] = false;
-                break; // System keys should still be processed via DefWindowProc().
+                break; // System inputs should still be processed via DefWindowProc().
+            }
+
+            // // Mouse Button Events
+            mouse_button_handlers(LBUTTON, 0)
+            mouse_button_handlers(RBUTTON, 1)
+            mouse_button_handlers(MBUTTON, 2)
+            case WM_XBUTTONDOWN: {
+                instance->window->mouse_button_down[(w_param >> 16) + 2] = true;
+                break; // System inputs should still be processed via DefWindowProc().
+            }
+            case WM_XBUTTONUP: {
+                instance->window->mouse_button_down[(w_param >> 16) + 2] = false;
+                break; // System inputs should still be processed via DefWindowProc().
             }
         }
     }
@@ -158,8 +187,12 @@ static void process_events(Window *window) {
     }
 }
 
-static bool key_down(Platform *platform, InputKey key) {
+static bool key_down(Platform *platform, Key key) {
     return platform->window->key_down[platform->key_map[(s32)key]];
+}
+
+static bool mouse_button_down(Platform *platform, u32 button) {
+    return platform->window->mouse_button_down[button];
 }
 
 static Vec2<s32> get_mouse_position(Platform *platform) {
