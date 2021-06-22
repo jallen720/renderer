@@ -50,12 +50,10 @@ static Platform *instance;
 ////////////////////////////////////////////////////////////
 #define mouse_button_handlers(name, num) \
     case WM_ ## name ## DOWN: { \
-        print_line(#name " DOWN"); \
         instance->window->mouse_button_down[num] = true; \
         break; \
     } \
     case WM_ ## name ## UP: { \
-        print_line(#name " UP"); \
         instance->window->mouse_button_down[num] = false; \
         break; \
     }

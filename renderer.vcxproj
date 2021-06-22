@@ -150,7 +150,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="core.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="test\graphics.h" />
     <ClInclude Include="vulkan.h" />
