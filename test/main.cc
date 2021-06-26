@@ -18,44 +18,95 @@ using namespace ctk;
 
 #define USE_GLM
 
+static bool use_glm = true;
+
 namespace test {
-#ifdef USE_GLM
-    using Matrix = glm::mat4;
 
-    template<typename Type>
-    using Vec3 = glm::vec3;
+union Matrix {
+    ctk::Matrix ctk;
+    glm::mat4 glm;
+    f32 data[16];
 
-    Matrix perspective(f32 fov, f32 aspect_ratio, f32 z_near, f32 z_far) {
-        return glm::perspective(fov, aspect_ratio, z_near, z_far);
+    f32 *operator[](u32 row) { return data + (row * 4); }
+};
+
+static Matrix default_matrix() {
+    if (use_glm)
+        return { .glm = glm::mat4(1.0f) };
+    else
+        return { .ctk = ctk::MATRIX_ID };
+}
+
+static Matrix operator*(Matrix &l, Matrix &r) {
+    if (use_glm)
+        return { .glm = l.glm * r.glm };
+    else
+        return { .ctk = l.ctk * r.ctk };
+}
+
+union Vec3 {
+    ctk::Vec3<f32> ctk;
+    glm::vec3 glm;
+    struct { f32 x, y, z; };
+
+    Vec3 &operator+=(const Vec3 &r);
+};
+
+static Vec3 operator*(f32 r, const Vec3 &l) {
+    return {
+        l.x * r,
+        l.y * r,
+        l.z * r,
+    };
+}
+
+static Vec3 operator+(const Vec3 &l, const Vec3 &r) {
+    return {
+        l.x + r.x,
+        l.y + r.y,
+        l.z + r.z,
+    };
+}
+
+Vec3 &Vec3::operator+=(const Vec3 &r) {
+    this->x += r.x;
+    this->y += r.y;
+    this->z += r.z;
+    return *this;
+}
+
+Matrix perspective_matrix(PerspectiveInfo info) {
+    if (use_glm)
+        return { .glm = glm::perspective(glm::radians(info.vertical_fov), info.aspect, info.z_near, info.z_far) };
+    else
+        return { .ctk = ctk::perspective_matrix(info) };
+}
+
+Matrix rotate(Matrix matrix, f32 degrees, Axis axis) {
+    if (use_glm) {
+        if (axis == Axis::X) return { .glm = glm::rotate(matrix.glm, glm::radians(degrees), { 1, 0, 0 }) };
+        if (axis == Axis::Y) return { .glm = glm::rotate(matrix.glm, glm::radians(degrees), { 0, 1, 0 }) };
+        if (axis == Axis::Z) return { .glm = glm::rotate(matrix.glm, glm::radians(degrees), { 0, 0, 1 }) };
     }
-
-    f32 radians(f32 degrees) {
-        return glm::radians(degrees);
+    else {
+        return { .ctk = ctk::rotate(matrix.ctk, degrees, axis) };
     }
+}
 
-    Matrix rotate(Matrix matrix, f32 degrees, Axis axis) {
-        if (axis == Axis::X) return glm::rotate(matrix, radians(degrees), { 1, 0, 0 });
-        if (axis == Axis::Y) return glm::rotate(matrix, radians(degrees), { 0, 1, 0 });
-        if (axis == Axis::Z) return glm::rotate(matrix, radians(degrees), { 0, 0, 1 });
-    }
+Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
+    if (use_glm)
+        return { .glm = glm::translate(matrix.glm, { x, y, z }) };
+    else
+        return { .ctk = ctk::translate(matrix.ctk, { x, y, z }) };
+}
 
-    Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
-        return glm::translate(matrix, { x, y, z });
-    }
-#else
-    using Matrix = ctk::Matrix;
+Matrix look_at(Vec3 position, Vec3 point, Vec3 up) {
+    // if (use_glm)
+        return { .glm = glm::lookAt(position.glm, point.glm, up.glm) };
+    // else
+    //     return ctk::look_at(position.ctk, point.ctk, up.ctk);
+}
 
-    template<typename Type>
-    using Vec3 = ctk::Vec3<Type>;
-
-    Matrix perspective(f32 fov, f32 aspect_ratio, f32 z_near, f32 z_far) {
-        return ctk::perspective(fov, aspect_ratio, z_near, z_far);
-    }
-
-    Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
-        return ctk::translate(Matrix, x, y, z);
-    }
-#endif
 }
 
 struct Memory {
@@ -79,12 +130,9 @@ struct Mesh {
 };
 
 struct View {
-    f32 fov;
-    f32 aspect;
-    f32 z_near;
-    f32 z_far;
-    test::Vec3<f32> position;
-    test::Vec3<f32> rotation;
+    PerspectiveInfo perspective_info;
+    test::Vec3 position;
+    test::Vec3 rotation;
     f32 max_x_angle;
 };
 
@@ -325,10 +373,12 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
     bind_descriptor_data(test, gfx, vk);
 
     test->view = {
-        .fov = 90,
-        .aspect = (f32)vk->swapchain.extent.width / vk->swapchain.extent.height,
-        .z_near = 0.1f,
-        .z_far = 100,
+        .perspective_info = {
+            .vertical_fov = 90,
+            .aspect = (f32)vk->swapchain.extent.width / vk->swapchain.extent.height,
+            .z_near = 0.1f,
+            .z_far = 100,
+        },
         .position = { 0, 0, -2 },
         .rotation = { 0, 0, 0 },
         .max_x_angle = 89,
@@ -378,7 +428,7 @@ static void camera_controls(Test *test, Platform *platform) {
     // Translation
     static constexpr f32 TRANSLATION_SPEED = 0.05f;
     f32 mod = key_down(platform, Key::SHIFT) ? 2 : 1;
-    test::Vec3<f32> move_vec(0);
+    test::Vec3 move_vec = {};
 
     if (key_down(platform, Key::D)) move_vec.x += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::A)) move_vec.x -= TRANSLATION_SPEED * mod;
@@ -387,12 +437,12 @@ static void camera_controls(Test *test, Platform *platform) {
     if (key_down(platform, Key::W)) move_vec.z += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::S)) move_vec.z -= TRANSLATION_SPEED * mod;
 
-    test::Matrix model_matrix(1.0f);
+    test::Matrix model_matrix = test::default_matrix();
     model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
     model_matrix = test::rotate(model_matrix, test->view.rotation.y, Axis::Y);
     model_matrix = test::rotate(model_matrix, test->view.rotation.z, Axis::Z);
-    test::Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    test::Vec3<f32> right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
+    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    test::Vec3 right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
     test->view.position += move_vec.z * forward;
     test->view.position += move_vec.x * right;
     test->view.position.y += move_vec.y;
@@ -421,19 +471,22 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
 
          if (key_down(platform, Key::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
     else if (key_down(platform, Key::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
+
+         if (key_down(platform, Key::F1)) use_glm = true;
+    else if (key_down(platform, Key::F2)) use_glm = false;
 }
 
 static test::Matrix calculate_view_space_matrix(View *view) {
     // View Matrix
-    test::Matrix model_matrix(1.0f);
+    test::Matrix model_matrix = test::default_matrix();
     model_matrix = test::rotate(model_matrix, view->rotation.x, Axis::X);
     model_matrix = test::rotate(model_matrix, view->rotation.y, Axis::Y);
     model_matrix = test::rotate(model_matrix, view->rotation.z, Axis::Z);
-    test::Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    test::Matrix view_matrix = glm::lookAt(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
+    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    test::Matrix view_matrix = test::look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
 
     // Projection Matrix
-    test::Matrix projection_matrix = test::perspective(test::radians(view->fov), view->aspect, view->z_near, view->z_far);
+    test::Matrix projection_matrix = test::perspective_matrix(view->perspective_info);
     projection_matrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
     return projection_matrix * view_matrix;

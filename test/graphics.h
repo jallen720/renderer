@@ -6,6 +6,9 @@
 
 using namespace ctk;
 
+////////////////////////////////////////////////////////////
+/// Data
+////////////////////////////////////////////////////////////
 struct ShaderGroup {
     Shader *vert;
     Shader *frag;
@@ -41,16 +44,19 @@ struct Graphics {
     struct {
         VkDescriptorSetLayout color;
         VkDescriptorSetLayout sampler;
+        VkDescriptorSetLayout entity;
     } descriptor_set_layout;
 
     struct {
         Array<VkDescriptorSet> *color;
         Array<VkDescriptorSet> *sampler;
+        Array<VkDescriptorSet> *entity;
     } descriptor_set;
 
     struct {
         ShaderGroup color;
         ShaderGroup sampler;
+        ShaderGroup entity;
     } shader;
 
     RenderPass *main_render_pass;
@@ -58,6 +64,7 @@ struct Graphics {
     struct {
         Pipeline *color;
         Pipeline *sampler;
+        Pipeline *entity;
     } pipeline;
 
     struct {
@@ -73,6 +80,9 @@ struct Graphics {
     } sync;
 };
 
+////////////////////////////////////////////////////////////
+/// Internal
+////////////////////////////////////////////////////////////
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
     {
         BufferInfo info = {};
@@ -125,7 +135,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
     gfx->descriptor_pool = create_descriptor_pool(vk, {
         .descriptor_count = {
             .uniform_buffer = 8,
-            // .uniform_buffer_dynamic = 4,
+            .uniform_buffer_dynamic = 4,
             .combined_image_sampler = 4,
             // .input_attachment = 4,
         },
@@ -160,6 +170,21 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
         allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.sampler,
                                  vk->swapchain.image_count, gfx->descriptor_set.sampler->data);
     }
+
+    // Entity
+    {
+        DescriptorInfo descriptor_infos[] = {
+            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        };
+
+        gfx->descriptor_set_layout.entity = create_descriptor_set_layout(vk, descriptor_infos,
+                                                                         CTK_ARRAY_SIZE(descriptor_infos));
+
+        gfx->descriptor_set.entity = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
+        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.entity,
+                                 vk->swapchain.image_count, gfx->descriptor_set.entity->data);
+    }
 }
 
 static void create_shaders(Graphics *gfx, Vulkan *vk) {
@@ -171,6 +196,10 @@ static void create_shaders(Graphics *gfx, Vulkan *vk) {
         .sampler = {
             .vert = create_shader(vk, "data/shaders/sampler.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
             .frag = create_shader(vk, "data/shaders/sampler.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
+        },
+        .entity = {
+            .vert = create_shader(vk, "data/shaders/entity.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            .frag = create_shader(vk, "data/shaders/entity.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
         },
     };
 }
@@ -324,6 +353,43 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
 
         pop_frame(gfx->mem.temp);
     }
+
+    // Entity
+    {
+        push_frame(gfx->mem.temp);
+
+        PipelineInfo info = DEFAULT_PIPELINE_INFO;
+        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(gfx->mem.temp, 1);
+        info.vertex_bindings = create_array<VkVertexInputBindingDescription>(gfx->mem.temp, 1);
+        info.vertex_attributes = create_array<VkVertexInputAttributeDescription>(gfx->mem.temp, 2);
+        info.viewports = create_array<VkViewport>(gfx->mem.temp, 1);
+        info.scissors = create_array<VkRect2D>(gfx->mem.temp, 1);
+
+        push(&info.shaders, gfx->shader.entity.vert);
+        push(&info.shaders, gfx->shader.entity.frag);
+        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
+
+        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.entity);
+        push(info.vertex_bindings, default_vertex_binding);
+        push(info.vertex_attributes, {
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = 0,
+        });
+        push(info.vertex_attributes, {
+            .location = 1,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = 12,
+        });
+        push(info.viewports, default_viewport);
+        push(info.scissors, default_scissor);
+
+        gfx->pipeline.entity = create_pipeline(vk, gfx->main_render_pass, 0, &info);
+
+        pop_frame(gfx->mem.temp);
+    }
 }
 
 static void init_swap_state(Graphics *gfx, Vulkan *vk) {
@@ -363,6 +429,9 @@ static void init_sync(Graphics *gfx, Vulkan *vk, u32 frame_count) {
     }
 }
 
+////////////////////////////////////////////////////////////
+/// Interface
+////////////////////////////////////////////////////////////
 static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk) {
     Graphics *gfx = allocate<Graphics>(module_mem, 1);
     gfx->mem.module = module_mem;
