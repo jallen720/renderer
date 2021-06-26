@@ -136,7 +136,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
         .descriptor_count = {
             .uniform_buffer = 8,
             .uniform_buffer_dynamic = 4,
-            .combined_image_sampler = 4,
+            .combined_image_sampler = 8,
             // .input_attachment = 4,
         },
         .max_descriptor_sets = 64,

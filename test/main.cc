@@ -30,6 +30,14 @@ union Matrix {
     f32 *operator[](u32 row) { return data + (row * 4); }
 };
 
+union Vec3 {
+    ctk::Vec3<f32> ctk;
+    glm::vec3 glm;
+    struct { f32 x, y, z; };
+
+    Vec3 &operator+=(const Vec3 &r);
+};
+
 static Matrix default_matrix() {
     if (use_glm)
         return { .glm = glm::mat4(1.0f) };
@@ -42,37 +50,6 @@ static Matrix operator*(Matrix &l, Matrix &r) {
         return { .glm = l.glm * r.glm };
     else
         return { .ctk = l.ctk * r.ctk };
-}
-
-union Vec3 {
-    ctk::Vec3<f32> ctk;
-    glm::vec3 glm;
-    struct { f32 x, y, z; };
-
-    Vec3 &operator+=(const Vec3 &r);
-};
-
-static Vec3 operator*(f32 r, const Vec3 &l) {
-    return {
-        l.x * r,
-        l.y * r,
-        l.z * r,
-    };
-}
-
-static Vec3 operator+(const Vec3 &l, const Vec3 &r) {
-    return {
-        l.x + r.x,
-        l.y + r.y,
-        l.z + r.z,
-    };
-}
-
-Vec3 &Vec3::operator+=(const Vec3 &r) {
-    this->x += r.x;
-    this->y += r.y;
-    this->z += r.z;
-    return *this;
 }
 
 Matrix perspective_matrix(PerspectiveInfo info) {
@@ -101,10 +78,33 @@ Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
 }
 
 Matrix look_at(Vec3 position, Vec3 point, Vec3 up) {
-    // if (use_glm)
+    if (use_glm)
         return { .glm = glm::lookAt(position.glm, point.glm, up.glm) };
-    // else
-    //     return ctk::look_at(position.ctk, point.ctk, up.ctk);
+    else
+        return { .ctk = ctk::look_at(position.ctk, point.ctk, up.ctk) };
+}
+
+static Vec3 operator*(f32 r, const Vec3 &l) {
+    return {
+        l.x * r,
+        l.y * r,
+        l.z * r,
+    };
+}
+
+static Vec3 operator+(const Vec3 &l, const Vec3 &r) {
+    return {
+        l.x + r.x,
+        l.y + r.y,
+        l.z + r.z,
+    };
+}
+
+Vec3 &Vec3::operator+=(const Vec3 &r) {
+    this->x += r.x;
+    this->y += r.y;
+    this->z += r.z;
+    return *this;
 }
 
 }
@@ -472,8 +472,8 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
          if (key_down(platform, Key::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
     else if (key_down(platform, Key::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
 
-         if (key_down(platform, Key::F1)) use_glm = true;
-    else if (key_down(platform, Key::F2)) use_glm = false;
+         if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
+    else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
 }
 
 static test::Matrix calculate_view_space_matrix(View *view) {
