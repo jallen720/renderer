@@ -2,10 +2,6 @@
 #define STB_IMAGE_STATIC
 #include <stb/stb_image.h>
 
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
 #include "renderer/platform.h"
 #include "renderer/vulkan.h"
 #include "renderer/test/graphics.h"
@@ -13,98 +9,9 @@
 #include "ctk/containers.h"
 #include "ctk/math.h"
 
+// #include "renderer/glm_test.h"
+
 using namespace ctk;
-
-static bool use_glm = true;
-
-namespace test {
-
-union Matrix {
-    ctk::Matrix ctk;
-    glm::mat4 glm;
-    f32 data[16];
-
-    f32 *operator[](u32 row) { return data + (row * 4); }
-};
-
-union Vec3 {
-    ctk::Vec3<f32> ctk;
-    glm::vec3 glm;
-    struct { f32 x, y, z; };
-
-    Vec3 &operator+=(const Vec3 &r);
-};
-
-static Matrix default_matrix() {
-    if (use_glm)
-        return { .glm = glm::mat4(1.0f) };
-    else
-        return { .ctk = ctk::MATRIX_ID };
-}
-
-static Matrix operator*(Matrix &l, Matrix &r) {
-    if (use_glm)
-        return { .glm = l.glm * r.glm };
-    else
-        return { .ctk = l.ctk * r.ctk };
-}
-
-Matrix perspective_matrix(PerspectiveInfo info) {
-    if (use_glm)
-        return { .glm = glm::perspective(glm::radians(info.vertical_fov), info.aspect, info.z_near, info.z_far) };
-    else
-        return { .ctk = ctk::perspective_matrix(info) };
-}
-
-Matrix rotate(Matrix matrix, f32 degrees, Axis axis) {
-    if (use_glm) {
-        if (axis == Axis::X) return { .glm = glm::rotate(matrix.glm, glm::radians(degrees), { 1, 0, 0 }) };
-        if (axis == Axis::Y) return { .glm = glm::rotate(matrix.glm, glm::radians(degrees), { 0, 1, 0 }) };
-        if (axis == Axis::Z) return { .glm = glm::rotate(matrix.glm, glm::radians(degrees), { 0, 0, 1 }) };
-    }
-    else {
-        return { .ctk = ctk::rotate(matrix.ctk, degrees, axis) };
-    }
-}
-
-Matrix translate(Matrix matrix, Vec3 translation) {
-    if (use_glm)
-        return { .glm = glm::translate(matrix.glm, translation.glm) };
-    else
-        return { .ctk = ctk::translate(matrix.ctk, translation.ctk) };
-}
-
-Matrix look_at(Vec3 position, Vec3 point, Vec3 up) {
-    if (use_glm)
-        return { .glm = glm::lookAt(position.glm, point.glm, up.glm) };
-    else
-        return { .ctk = ctk::look_at(position.ctk, point.ctk, up.ctk) };
-}
-
-static Vec3 operator*(f32 r, const Vec3 &l) {
-    return {
-        l.x * r,
-        l.y * r,
-        l.z * r,
-    };
-}
-
-static Vec3 operator+(const Vec3 &l, const Vec3 &r) {
-    return {
-        l.x + r.x,
-        l.y + r.y,
-        l.z + r.z,
-    };
-}
-
-Vec3 &Vec3::operator+=(const Vec3 &r) {
-    this->x += r.x;
-    this->y += r.y;
-    this->z += r.z;
-    return *this;
-}
-
-}
 
 struct Memory {
     Allocator *fixed;
@@ -128,14 +35,14 @@ struct Mesh {
 
 struct View {
     PerspectiveInfo perspective_info;
-    test::Vec3 position;
-    test::Vec3 rotation;
+    Vec3<f32> position;
+    Vec3<f32> rotation;
     f32 max_x_angle;
 };
 
 struct Entity {
-    test::Vec3 position;
-    test::Vec3 rotation;
+    Vec3<f32> position;
+    Vec3<f32> rotation;
 };
 
 struct Test {
@@ -166,7 +73,7 @@ struct Test {
 
     Vec3<f32> color;
     FixedArray<Entity, MAX_ENTITIES> entities;
-    FixedArray<test::Matrix, MAX_ENTITIES> entity_matrixes;
+    FixedArray<Matrix, MAX_ENTITIES> entity_matrixes;
 };
 
 static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
@@ -426,7 +333,7 @@ static void camera_controls(Test *test, Platform *platform) {
     // Translation
     static constexpr f32 TRANSLATION_SPEED = 0.05f;
     f32 mod = key_down(platform, Key::SHIFT) ? 2 : 1;
-    test::Vec3 move_vec = {};
+    Vec3<f32> move_vec = {};
 
     if (key_down(platform, Key::D)) move_vec.x += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::A)) move_vec.x -= TRANSLATION_SPEED * mod;
@@ -435,12 +342,12 @@ static void camera_controls(Test *test, Platform *platform) {
     if (key_down(platform, Key::W)) move_vec.z += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::S)) move_vec.z -= TRANSLATION_SPEED * mod;
 
-    test::Matrix model_matrix = test::default_matrix();
-    model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
-    model_matrix = test::rotate(model_matrix, test->view.rotation.y, Axis::Y);
-    model_matrix = test::rotate(model_matrix, test->view.rotation.z, Axis::Z);
-    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    test::Vec3 right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
+    Matrix model_matrix = MATRIX_ID;
+    model_matrix = rotate(model_matrix, test->view.rotation.x, Axis::X);
+    model_matrix = rotate(model_matrix, test->view.rotation.y, Axis::Y);
+    model_matrix = rotate(model_matrix, test->view.rotation.z, Axis::Z);
+    Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    Vec3<f32> right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
     test->view.position += move_vec.z * forward;
     test->view.position += move_vec.x * right;
     test->view.position.y += move_vec.y;
@@ -463,36 +370,36 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
-         if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
-    else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
+    //      if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
+    // else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
 }
 
-static test::Matrix calculate_view_space_matrix(View *view) {
+static Matrix calculate_view_space_matrix(View *view) {
     // View Matrix
-    test::Matrix model_matrix = test::default_matrix();
-    model_matrix = test::rotate(model_matrix, view->rotation.x, Axis::X);
-    model_matrix = test::rotate(model_matrix, view->rotation.y, Axis::Y);
-    model_matrix = test::rotate(model_matrix, view->rotation.z, Axis::Z);
-    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    test::Matrix view_matrix = test::look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
+    Matrix model_matrix = MATRIX_ID;
+    model_matrix = rotate(model_matrix, view->rotation.x, Axis::X);
+    model_matrix = rotate(model_matrix, view->rotation.y, Axis::Y);
+    model_matrix = rotate(model_matrix, view->rotation.z, Axis::Z);
+    Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    Matrix view_matrix = look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
 
     // Projection Matrix
-    test::Matrix projection_matrix = test::perspective_matrix(view->perspective_info);
+    Matrix projection_matrix = perspective_matrix(view->perspective_info);
     projection_matrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
     return projection_matrix * view_matrix;
 }
 
 static void update_entity_matrixes(Test *test, Graphics *gfx, Vulkan *vk) {
-    test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+    Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
 
     for (u32 i = 0; i < test->entities.count; ++i) {
         Entity *entity = test->entities.data + i;
 
-        test::Matrix m = test::translate(test::default_matrix(), entity->position);
-        m = test::rotate(m, entity->rotation.x, Axis::X);
-        m = test::rotate(m, entity->rotation.y, Axis::Y);
-        m = test::rotate(m, entity->rotation.z, Axis::Z);
+        Matrix m = translate(MATRIX_ID, entity->position);
+        m = rotate(m, entity->rotation.x, Axis::X);
+        m = rotate(m, entity->rotation.y, Axis::Y);
+        m = rotate(m, entity->rotation.z, Axis::Z);
 
         test->entity_matrixes.data[i] = view_space_matrix * m;
     }
@@ -569,8 +476,8 @@ s32 main() {
         .surface = {
             .x = 600,
             .y = 100,
-            .width = 1000,
-            .height = 600,
+            .width = 1920,
+            .height = 1080,
         },
         .title = L"Renderer",
     });
