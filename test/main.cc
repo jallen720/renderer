@@ -139,7 +139,7 @@ struct Entity {
 };
 
 struct Test {
-    static constexpr u32 MAX_ENTITIES = 64;
+    static constexpr u32 MAX_ENTITIES = 6400;
 
     struct {
         Mesh quad;
@@ -353,10 +353,11 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_entities(Test *test) {
-    for (s32 y = 0; y < 4; ++y)
-    for (s32 x = 0; x < 4; ++x) {
+    for (s32 z = 0; z < 10; ++z)
+    for (s32 y = 0; y < 10; ++y)
+    for (s32 x = 0; x < 10; ++x) {
         push(&test->entities, {
-            .position = { (f32)x * 3, (f32)-y * 3, 0 },
+            .position = { (f32)x * 3, (f32)-y * 3, (f32)z * 3 },
             .rotation = { 0, 0, 0 },
         });
     }
@@ -535,7 +536,7 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
         };
 
         for (u32 i = 0; i < test->entities.count; ++i) {
-            u32 offset = i * vk->physical_device.min_uniform_buffer_offset_alignment;
+            u32 offset = i * 64;//vk->physical_device.min_uniform_buffer_offset_alignment;
             vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
                                     0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
                                     1, &offset);
