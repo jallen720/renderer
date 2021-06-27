@@ -393,18 +393,16 @@ static bool wrap_mouse_position(Vec2<s32> *mouse_position, u32 max_width, u32 ma
         mouse_position->x += max_width;
         wrapped = true;
     }
+    else if (mouse_position->x >= max_width) {
+        mouse_position->x -= max_width;
+        wrapped = true;
+    }
 
     if (mouse_position->y < 0) {
         mouse_position->y += max_height;
         wrapped = true;
     }
-
-    if (mouse_position->x >= max_width) {
-        mouse_position->x -= max_width;
-        wrapped = true;
-    }
-
-    if (mouse_position->y >= max_height) {
+    else if (mouse_position->y >= max_height) {
         mouse_position->y -= max_height;
         wrapped = true;
     }

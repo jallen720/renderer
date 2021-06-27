@@ -40,7 +40,7 @@ struct PhysicalDevice {
     QueueFamilyIndexes queue_family_idxs;
 
     VkPhysicalDeviceType type;
-    u32 min_uniform_buffer_region_align;
+    u32 min_uniform_buffer_offset_alignment;
 
     VkPhysicalDeviceFeatures features;
     VkPhysicalDeviceMemoryProperties mem_properties;
@@ -444,7 +444,7 @@ static void load_physical_device(Vulkan *vk, PhysicalDeviceFeature *requested_fe
         VkPhysicalDeviceProperties properties = {};
         vkGetPhysicalDeviceProperties(vk_physical_device, &properties);
         physical_device->type = properties.deviceType;
-        physical_device->min_uniform_buffer_region_align = properties.limits.minUniformBufferOffsetAlignment;
+        physical_device->min_uniform_buffer_offset_alignment = properties.limits.minUniformBufferOffsetAlignment;
 
 
         vkGetPhysicalDeviceFeatures(vk_physical_device, &physical_device->features);
@@ -753,7 +753,7 @@ static Region *allocate_region(Vulkan *vk, Buffer *buffer, u32 size, VkDeviceSiz
 }
 
 static Region *allocate_uniform_buffer_region(Vulkan *vk, Buffer *buffer, u32 size) {
-    return allocate_region(vk, buffer, size, vk->physical_device.min_uniform_buffer_region_align);
+    return allocate_region(vk, buffer, size, vk->physical_device.min_uniform_buffer_offset_alignment);
 }
 
 static void write_to_host_region(VkDevice device, Region *region, u32 offset, void *data, u32 size) {
