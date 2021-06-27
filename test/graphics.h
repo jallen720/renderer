@@ -314,8 +314,8 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
         .y = 0,
         .width = (f32)surface_extent.width,
         .height = (f32)surface_extent.height,
-        .minDepth = 1,
-        .maxDepth = 0
+        .minDepth = 0,
+        .maxDepth = 1
     };
 
     VkRect2D default_scissor = {
