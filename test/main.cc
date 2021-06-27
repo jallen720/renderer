@@ -16,8 +16,6 @@
 
 using namespace ctk;
 
-#define USE_GLM
-
 static bool use_glm = true;
 
 namespace test {
@@ -70,11 +68,11 @@ Matrix rotate(Matrix matrix, f32 degrees, Axis axis) {
     }
 }
 
-Matrix translate(Matrix matrix, f32 x, f32 y, f32 z) {
+Matrix translate(Matrix matrix, Vec3 translation) {
     if (use_glm)
-        return { .glm = glm::translate(matrix.glm, { x, y, z }) };
+        return { .glm = glm::translate(matrix.glm, translation.glm) };
     else
-        return { .ctk = ctk::translate(matrix.ctk, { x, y, z }) };
+        return { .ctk = ctk::translate(matrix.ctk, translation.ctk) };
 }
 
 Matrix look_at(Vec3 position, Vec3 point, Vec3 up) {
@@ -136,7 +134,14 @@ struct View {
     f32 max_x_angle;
 };
 
+struct Entity {
+    test::Vec3 position;
+    test::Vec3 rotation;
+};
+
 struct Test {
+    static constexpr u32 MAX_ENTITIES = 64;
+
     struct {
         Mesh quad;
     } mesh;
@@ -146,26 +151,23 @@ struct Test {
     } image;
 
     struct {
-        Array<Region *> *color;
-        Array<Region *> *matrix;
+        Array<Region *> *entity_matrixes;
     } uniform_buffer;
 
     struct {
         ImageSampler test;
     } image_sampler;
 
-    enum struct Pipeline {
-        SAMPLER,
-        COLOR,
-    } pipeline;
-
-    Vec3<f32> color;
     View view;
 
     struct {
         Vec2<s32> last_mouse_position;
         Vec2<s32> mouse_delta;
     } input;
+
+    Vec3<f32> color;
+    FixedArray<Entity, MAX_ENTITIES> entities;
+    FixedArray<test::Matrix, MAX_ENTITIES> entity_matrixes;
 };
 
 static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
@@ -319,13 +321,11 @@ static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
-    test->uniform_buffer.color = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
-    for (u32 i = 0; i < vk->swapchain.image_count; ++i)
-        test->uniform_buffer.color->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 16);
-
-    test->uniform_buffer.matrix = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
-    for (u32 i = 0; i < vk->swapchain.image_count; ++i)
-        test->uniform_buffer.matrix->data[i] = allocate_uniform_buffer_region(vk, gfx->buffer.device, 64);
+    test->uniform_buffer.entity_matrixes = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
+    for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+        test->uniform_buffer.entity_matrixes->data[i] =
+            allocate_uniform_buffer_region(vk, gfx->buffer.device, sizeof(Matrix) * Test::MAX_ENTITIES);
+    }
 }
 
 static void create_image_samplers(Test *test, Graphics *gfx) {
@@ -337,21 +337,8 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
         for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
             DescriptorBinding bindings[] = {
                 {
-                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    .uniform_buffer = test->uniform_buffer.color->data[i]
-                },
-            };
-
-            update_descriptor_set(vk, gfx->descriptor_set.color->data[i], CTK_ARRAY_SIZE(bindings), bindings);
-        }
-    }
-
-    {
-        for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-            DescriptorBinding bindings[] = {
-                {
-                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    .uniform_buffer = test->uniform_buffer.matrix->data[i]
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                    .uniform_buffer = test->uniform_buffer.entity_matrixes->data[i]
                 },
                 {
                     .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -359,8 +346,18 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
                 },
             };
 
-            update_descriptor_set(vk, gfx->descriptor_set.sampler->data[i], CTK_ARRAY_SIZE(bindings), bindings);
+            update_descriptor_set(vk, gfx->descriptor_set.entity->data[i], CTK_ARRAY_SIZE(bindings), bindings);
         }
+    }
+}
+
+static void create_entities(Test *test) {
+    for (s32 y = 0; y < 4; ++y)
+    for (s32 x = 0; x < 4; ++x) {
+        push(&test->entities, {
+            .position = { (f32)x * 3, (f32)-y * 3, 0 },
+            .rotation = { 0, 0, 0 },
+        });
     }
 }
 
@@ -385,6 +382,7 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
     };
 
     test->input.last_mouse_position = get_mouse_position(platform);
+    create_entities(test);
     return test;
 }
 
@@ -465,13 +463,6 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
-         if (key_down(platform, Key::Z)) test->color = { 1, 0.5f, 0.5f };
-    else if (key_down(platform, Key::X)) test->color = { 0.5f, 1, 0.5f };
-    else if (key_down(platform, Key::C)) test->color = { 0.5f, 0.5f, 1 };
-
-         if (key_down(platform, Key::NUM_1)) test->pipeline = Test::Pipeline::COLOR;
-    else if (key_down(platform, Key::NUM_2)) test->pipeline = Test::Pipeline::SAMPLER;
-
          if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
     else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
 }
@@ -492,23 +483,33 @@ static test::Matrix calculate_view_space_matrix(View *view) {
     return projection_matrix * view_matrix;
 }
 
-static void update_render_state(Graphics *gfx, Vulkan *vk, Test *test) {
+static void update_entity_matrixes(Test *test, Graphics *gfx, Vulkan *vk) {
+    test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+
+    for (u32 i = 0; i < test->entities.count; ++i) {
+        Entity *entity = test->entities.data + i;
+
+        test::Matrix m = test::translate(test::default_matrix(), entity->position);
+        m = test::rotate(m, entity->rotation.x, Axis::X);
+        m = test::rotate(m, entity->rotation.y, Axis::Y);
+        m = test::rotate(m, entity->rotation.z, Axis::Z);
+
+        test->entity_matrixes.data[i] = view_space_matrix * m;
+    }
+
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, gfx->temp_cmd_buf,
                                gfx->staging_region, 0,
-                               test->uniform_buffer.color->data[gfx->sync.swap_img_idx], 0,
-                               &test->color, sizeof(test->color));
-
-        test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
-
-        write_to_device_region(vk, gfx->temp_cmd_buf,
-                               gfx->staging_region, sizeof(test->color),
-                               test->uniform_buffer.matrix->data[gfx->sync.swap_img_idx], 0,
-                               &view_space_matrix, sizeof(view_space_matrix));
+                               test->uniform_buffer.entity_matrixes->data[gfx->sync.swap_img_idx], 0,
+                               test->entity_matrixes.data, byte_size(&test->entity_matrixes));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
-static void render(Graphics *gfx, Vulkan *vk, Test *test) {
+static void update_test_state(Test *test, Graphics *gfx, Vulkan *vk) {
+    update_entity_matrixes(test, gfx, vk);
+}
+
+static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
     VkCommandBuffer cmd_buf = gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -519,7 +520,7 @@ static void render(Graphics *gfx, Vulkan *vk, Test *test) {
     VkRenderPassBeginInfo rp_begin_info = {};
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.renderPass = gfx->main_render_pass->handle;
-    rp_begin_info.framebuffer = gfx->swap_state.framebufs->data[gfx->sync.swap_img_idx];
+    rp_begin_info.framebuffer = gfx->swap_state.framebuffers->data[gfx->sync.swap_img_idx];
     rp_begin_info.clearValueCount = gfx->main_render_pass->attachment_clear_values->count;
     rp_begin_info.pClearValues = gfx->main_render_pass->attachment_clear_values->data;
     rp_begin_info.renderArea = {
@@ -527,38 +528,27 @@ static void render(Graphics *gfx, Vulkan *vk, Test *test) {
         .extent = vk->swapchain.extent,
     };
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-        if (test->pipeline == Test::Pipeline::COLOR) {
-            vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.color->handle);
+        vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->handle);
 
-            // Bind descriptor sets.
-            VkDescriptorSet descriptor_sets[] = {
-                gfx->descriptor_set.color->data[gfx->sync.swap_img_idx],
-            };
+        // Bind descriptor sets.
+        VkDescriptorSet descriptor_sets[] = {
+            gfx->descriptor_set.entity->data[gfx->sync.swap_img_idx],
+        };
 
-            vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.color->layout,
+        for (u32 i = 0; i < test->entities.count; ++i) {
+            u32 offset = i * 64;
+            vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
                                     0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
-                                    0, NULL);
+                                    1, &offset);
+
+            // Bind mesh data.
+            Mesh *mesh = &test->mesh.quad;
+            vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
+            vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
+                                 VK_INDEX_TYPE_UINT32);
+
+            vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
         }
-        else {
-            vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.sampler->handle);
-
-            // Bind descriptor sets.
-            VkDescriptorSet descriptor_sets[] = {
-                gfx->descriptor_set.sampler->data[gfx->sync.swap_img_idx],
-            };
-
-            vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.sampler->layout,
-                                    0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
-                                    0, NULL);
-        }
-
-        // Bind mesh data.
-        Mesh *mesh = &test->mesh.quad;
-        vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
-        vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
-                             VK_INDEX_TYPE_UINT32);
-
-        vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
     vkCmdEndRenderPass(cmd_buf);
 
     vkEndCommandBuffer(cmd_buf);
@@ -614,11 +604,11 @@ s32 main() {
         if (!platform->window->open)
             break;
 
-        // Rendering
+        // Update
         next_frame(gfx, vk);
-        update_render_state(gfx, vk, test);
-        render(gfx, vk, test);
-        present(gfx, vk);
+        update_test_state(test, gfx, vk);
+        record_render_cmds(test, gfx, vk);
+        submit_render_cmds(gfx, vk);
     }
 
     return 0;

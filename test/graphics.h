@@ -42,33 +42,29 @@ struct Graphics {
     VkDescriptorPool descriptor_pool;
 
     struct {
-        VkDescriptorSetLayout color;
-        VkDescriptorSetLayout sampler;
         VkDescriptorSetLayout entity;
     } descriptor_set_layout;
 
     struct {
-        Array<VkDescriptorSet> *color;
-        Array<VkDescriptorSet> *sampler;
         Array<VkDescriptorSet> *entity;
     } descriptor_set;
 
     struct {
-        ShaderGroup color;
-        ShaderGroup sampler;
         ShaderGroup entity;
     } shader;
 
     RenderPass *main_render_pass;
 
     struct {
-        Pipeline *color;
-        Pipeline *sampler;
+        Image *depth;
+    } framebuffer_image;
+
+    struct {
         Pipeline *entity;
     } pipeline;
 
     struct {
-        Array<VkFramebuffer> *framebufs;
+        Array<VkFramebuffer> *framebuffers;
         Array<VkCommandBuffer> *render_cmd_bufs;
     } swap_state;
 
@@ -142,35 +138,6 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
         .max_descriptor_sets = 64,
     });
 
-    // Color
-    {
-        DescriptorInfo descriptor_infos[] = {
-            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
-        };
-
-        gfx->descriptor_set_layout.color = create_descriptor_set_layout(vk, descriptor_infos,
-                                                                        CTK_ARRAY_SIZE(descriptor_infos));
-
-        gfx->descriptor_set.color = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
-        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.color,
-                                 vk->swapchain.image_count, gfx->descriptor_set.color->data);
-    }
-
-    // Sampler
-    {
-        DescriptorInfo descriptor_infos[] = {
-            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         VK_SHADER_STAGE_VERTEX_BIT },
-            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-        };
-
-        gfx->descriptor_set_layout.sampler = create_descriptor_set_layout(vk, descriptor_infos,
-                                                                          CTK_ARRAY_SIZE(descriptor_infos));
-
-        gfx->descriptor_set.sampler = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
-        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.sampler,
-                                 vk->swapchain.image_count, gfx->descriptor_set.sampler->data);
-    }
-
     // Entity
     {
         DescriptorInfo descriptor_infos[] = {
@@ -189,14 +156,6 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
 
 static void create_shaders(Graphics *gfx, Vulkan *vk) {
     gfx->shader = {
-        .color = {
-            .vert = create_shader(vk, "data/shaders/color.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            .frag = create_shader(vk, "data/shaders/color.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
-        },
-        .sampler = {
-            .vert = create_shader(vk, "data/shaders/sampler.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            .frag = create_shader(vk, "data/shaders/sampler.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
-        },
         .entity = {
             .vert = create_shader(vk, "data/shaders/entity.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
             .frag = create_shader(vk, "data/shaders/entity.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -222,8 +181,8 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk) {
 
         RenderPassInfo info = {
             .attachment = {
-                .descriptions = create_array<VkAttachmentDescription>(gfx->mem.temp, 1),
-                .clear_values = create_array<VkClearValue>(gfx->mem.temp, 1),
+                .descriptions = create_array<VkAttachmentDescription>(gfx->mem.temp, 2),
+                .clear_values = create_array<VkClearValue>(gfx->mem.temp, 2),
             },
             .subpass = {
                 .infos = create_array<SubpassInfo>(gfx->mem.temp, 1),
@@ -232,6 +191,22 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk) {
         };
 
         // Swapchain Image Attachment
+        u32 depth_attachment_index = push_attachment(&info, {
+            .description = {
+                .flags = 0,
+                .format = vk->physical_device.depth_image_format,
+                .samples = VK_SAMPLE_COUNT_1_BIT,
+
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+
+                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            },
+            .clear_value = { 1.0f, 0 },
+        });
         u32 swapchain_attachment_index = push_attachment(&info, {
             .description = {
                 .flags = 0,
@@ -244,23 +219,85 @@ static void create_render_passes(Graphics *gfx, Vulkan *vk) {
                 .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 
                 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .finalLayout   = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             },
-            .clear_value = { 1, 0, 0, 1 },
+            .clear_value = { 0, 0, 0, 1 },
         });
 
         // Subpasses
         SubpassInfo *subpass_info = push(info.subpass.infos);
         subpass_info->color_attachment_refs = create_array<VkAttachmentReference>(gfx->mem.temp, 1);
+        subpass_info->depth_attachment_ref = {
+            .attachment = depth_attachment_index,
+            .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        };
         push(subpass_info->color_attachment_refs, {
             .attachment = swapchain_attachment_index,
             .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
 
+        // push(info.subpass.dependencies, {
+        //     .srcSubpass = 0,
+        //     .dstSubpass = VK_SUBPASS_EXTERNAL,
+        //     .srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        //     .dstStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        //     .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+        //                      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        //     .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+        //     .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+        // });
+
         gfx->main_render_pass = create_render_pass(vk, &info);
 
         pop_frame(gfx->mem.temp);
     }
+}
+
+static void create_framebuffer_images(Graphics *gfx, Vulkan *vk) {
+    VkFormat depth_fmt = vk->physical_device.depth_image_format;
+
+    gfx->framebuffer_image.depth = create_image(vk, {
+        .image = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .flags = 0,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = depth_fmt,
+            .extent = {
+                .width = vk->swapchain.extent.width,
+                .height = vk->swapchain.extent.height,
+                .depth = 1
+            },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 0, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+            .pQueueFamilyIndices = NULL, // Ignored if sharingMode is not VK_SHARING_MODE_CONCURRENT.
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        },
+        .view = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .flags = 0,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = depth_fmt,
+            .components = {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        },
+        .mem_property_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    });
 }
 
 static void create_pipelines(Graphics *gfx, Vulkan *vk) {
@@ -285,74 +322,6 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
         .offset = { 0, 0 },
         .extent = surface_extent
     };
-
-    // Color
-    {
-        push_frame(gfx->mem.temp);
-
-        PipelineInfo info = DEFAULT_PIPELINE_INFO;
-        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(gfx->mem.temp, 1);
-        info.vertex_bindings = create_array<VkVertexInputBindingDescription>(gfx->mem.temp, 1);
-        info.vertex_attributes = create_array<VkVertexInputAttributeDescription>(gfx->mem.temp, 2);
-        info.viewports = create_array<VkViewport>(gfx->mem.temp, 1);
-        info.scissors = create_array<VkRect2D>(gfx->mem.temp, 1);
-
-        push(&info.shaders, gfx->shader.color.vert);
-        push(&info.shaders, gfx->shader.color.frag);
-        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
-
-        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.color);
-        push(info.vertex_bindings, default_vertex_binding);
-        push(info.vertex_attributes, {
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = 0,
-        });
-        push(info.viewports, default_viewport);
-        push(info.scissors, default_scissor);
-
-        gfx->pipeline.color = create_pipeline(vk, gfx->main_render_pass, 0, &info);
-
-        pop_frame(gfx->mem.temp);
-    }
-
-    // Sampler
-    {
-        push_frame(gfx->mem.temp);
-
-        PipelineInfo info = DEFAULT_PIPELINE_INFO;
-        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(gfx->mem.temp, 1);
-        info.vertex_bindings = create_array<VkVertexInputBindingDescription>(gfx->mem.temp, 1);
-        info.vertex_attributes = create_array<VkVertexInputAttributeDescription>(gfx->mem.temp, 2);
-        info.viewports = create_array<VkViewport>(gfx->mem.temp, 1);
-        info.scissors = create_array<VkRect2D>(gfx->mem.temp, 1);
-
-        push(&info.shaders, gfx->shader.sampler.vert);
-        push(&info.shaders, gfx->shader.sampler.frag);
-        push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
-
-        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.sampler);
-        push(info.vertex_bindings, default_vertex_binding);
-        push(info.vertex_attributes, {
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = 0,
-        });
-        push(info.vertex_attributes, {
-            .location = 1,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = 12,
-        });
-        push(info.viewports, default_viewport);
-        push(info.scissors, default_scissor);
-
-        gfx->pipeline.sampler = create_pipeline(vk, gfx->main_render_pass, 0, &info);
-
-        pop_frame(gfx->mem.temp);
-    }
 
     // Entity
     {
@@ -386,6 +355,11 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
         push(info.viewports, default_viewport);
         push(info.scissors, default_scissor);
 
+        // Enable depth testing.
+        info.depth_stencil.depthTestEnable = VK_TRUE;
+        info.depth_stencil.depthWriteEnable = VK_TRUE;
+        info.depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
         gfx->pipeline.entity = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
         pop_frame(gfx->mem.temp);
@@ -394,20 +368,22 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
 
 static void init_swap_state(Graphics *gfx, Vulkan *vk) {
     {
-        gfx->swap_state.framebufs = create_array<VkFramebuffer>(gfx->mem.module, vk->swapchain.image_count);
+        gfx->swap_state.framebuffers = create_array<VkFramebuffer>(gfx->mem.module, vk->swapchain.image_count);
 
         // Create framebuffer for each swapchain image.
         for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
             push_frame(gfx->mem.temp);
 
-            FramebufferInfo info = {
-                .attachments = create_array<VkImageView>(gfx->mem.temp, 1),
-                .extent = get_surface_extent(vk),
-                .layers = 1,
-            };
+            FramebufferInfo info = {};
 
+            info.attachments = create_array<VkImageView>(gfx->mem.temp, 2),
+            push(info.attachments, gfx->framebuffer_image.depth->view);
             push(info.attachments, vk->swapchain.image_views[i]);
-            push(gfx->swap_state.framebufs, create_framebuffer(vk->device, gfx->main_render_pass->handle, &info));
+
+            info.extent = get_surface_extent(vk);
+            info.layers = 1;
+
+            push(gfx->swap_state.framebuffers, create_framebuffer(vk->device, gfx->main_render_pass->handle, &info));
 
             pop_frame(gfx->mem.temp);
         }
@@ -444,6 +420,7 @@ static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk) {
     create_descriptor_sets(gfx, vk);
     create_shaders(gfx, vk);
     create_render_passes(gfx, vk);
+    create_framebuffer_images(gfx, vk);
     create_pipelines(gfx, vk);
 
     init_swap_state(gfx, vk);
@@ -466,7 +443,7 @@ static void next_frame(Graphics *gfx, Vulkan *vk) {
     gfx->sync.swap_img_idx = next_swap_img_idx(vk, gfx->sync.frame->img_aquired, VK_NULL_HANDLE);
 }
 
-static void present(Graphics *gfx, Vulkan *vk) {
+static void submit_render_cmds(Graphics *gfx, Vulkan *vk) {
     // Rendering
     {
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;

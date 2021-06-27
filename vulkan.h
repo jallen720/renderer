@@ -97,7 +97,7 @@ struct SubpassInfo {
     Array<u32> *preserve_attachment_indexes;
     Array<VkAttachmentReference> *input_attachment_refs;
     Array<VkAttachmentReference> *color_attachment_refs;
-    VkAttachmentReference *depth_attachment_ref;
+    VkAttachmentReference depth_attachment_ref;
 };
 
 struct AttachmentInfo {
@@ -900,7 +900,7 @@ static RenderPass *create_render_pass(Vulkan *vk, RenderPassInfo *info) {
         }
 
         description->pResolveAttachments = NULL;
-        description->pDepthStencilAttachment = subpass_info->depth_attachment_ref;
+        description->pDepthStencilAttachment = &subpass_info->depth_attachment_ref;
     }
 
     // Render Pass
