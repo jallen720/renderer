@@ -478,6 +478,7 @@ static void load_physical_device(Vulkan *vk, PhysicalDeviceFeature *requested_fe
     }
 
     vk->physical_device = *suitable_device;
+
     pop_frame(vk->mem.temp);
 }
 
