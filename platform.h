@@ -179,7 +179,7 @@ static Platform *create_platform(Allocator *module_mem, WindowInfo window_info) 
 static void process_events(Window *window) {
     MSG msg;
 
-    if (PeekMessage(&msg, window->handle, 0, 0, PM_REMOVE)) {
+    while (PeekMessage(&msg, window->handle, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
