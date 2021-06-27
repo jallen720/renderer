@@ -322,9 +322,11 @@ static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
 
 static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
     test->uniform_buffer.entity_matrixes = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
+
     for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+        u32 element_size = multiple_of(sizeof(Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
         test->uniform_buffer.entity_matrixes->data[i] =
-            allocate_uniform_buffer_region(vk, gfx->buffer.device, sizeof(Matrix) * Test::MAX_ENTITIES);
+            allocate_uniform_buffer_region(vk, gfx->buffer.device, element_size * Test::MAX_ENTITIES);
     }
 }
 
@@ -534,7 +536,7 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
         };
 
         for (u32 i = 0; i < test->entities.count; ++i) {
-            u32 offset = i * 64;
+            u32 offset = i * vk->physical_device.min_uniform_buffer_offset_alignment;
             vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
                                     0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
                                     1, &offset);
