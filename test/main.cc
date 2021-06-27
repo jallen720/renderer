@@ -353,9 +353,9 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_entities(Test *test) {
-    for (s32 z = 0; z < 10; ++z)
-    for (s32 y = 0; y < 10; ++y)
-    for (s32 x = 0; x < 10; ++x) {
+    for (s32 z = 0; z < 12; ++z)
+    for (s32 y = 0; y < 12; ++y)
+    for (s32 x = 0; x < 12; ++x) {
         push(&test->entities, {
             .position = { (f32)x * 3, (f32)-y * 3, (f32)z * 3 },
             .rotation = { 0, 0, 0 },
