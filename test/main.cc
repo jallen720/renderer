@@ -9,7 +9,7 @@
 #include "ctk/containers.h"
 #include "ctk/math.h"
 
-// #include "renderer/glm_test.h"
+#include "renderer/glm_test.h"
 
 using namespace ctk;
 
@@ -22,7 +22,7 @@ struct Memory {
 };
 
 struct Vertex {
-    Vec3<f32> position;
+    test::Vec3 position;
     Vec2<f32> uv;
 };
 
@@ -35,14 +35,14 @@ struct Mesh {
 
 struct View {
     PerspectiveInfo perspective_info;
-    Vec3<f32> position;
-    Vec3<f32> rotation;
+    test::Vec3 position;
+    test::Vec3 rotation;
     f32 max_x_angle;
 };
 
 struct Entity {
-    Vec3<f32> position;
-    Vec3<f32> rotation;
+    test::Vec3 position;
+    test::Vec3 rotation;
 };
 
 struct Test {
@@ -71,10 +71,25 @@ struct Test {
         Vec2<s32> mouse_delta;
     } input;
 
-    Vec3<f32> color;
+    test::Vec3 color;
     FixedArray<Entity, MAX_ENTITIES> entities;
-    FixedArray<Matrix, MAX_ENTITIES> entity_matrixes;
+    FixedArray<test::Matrix, MAX_ENTITIES> entity_matrixes;
 };
+
+struct RecordRenderCommandsState {
+    Test *test;
+    Graphics *gfx;
+    Vulkan *vk;
+};
+
+struct UpdateEntityMatrixesState {
+    Test *test;
+    u32 start;
+    u32 count;
+    test::Matrix view_space_matrix;
+};
+
+static bool use_threads = false;
 
 static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
     mesh->vertexes = vertexes,
@@ -230,7 +245,7 @@ static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulka
     test->uniform_buffer.entity_matrixes = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
 
     for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-        u32 element_size = multiple_of(sizeof(Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
+        u32 element_size = multiple_of(sizeof(test::Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
         test->uniform_buffer.entity_matrixes->data[i] =
             allocate_uniform_buffer_region(vk, gfx->buffer.device, element_size * Test::MAX_ENTITIES);
     }
@@ -260,9 +275,9 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_entities(Test *test) {
-    for (s32 z = 0; z < 12; ++z)
-    for (s32 y = 0; y < 12; ++y)
-    for (s32 x = 0; x < 12; ++x) {
+    for (s32 z = 0; z < 16; ++z)
+    for (s32 y = 0; y < 16; ++y)
+    for (s32 x = 0; x < 16; ++x) {
         push(&test->entities, {
             .position = { (f32)x * 3, (f32)-y * 3, (f32)z * 3 },
             .rotation = { 0, 0, 0 },
@@ -333,7 +348,7 @@ static void camera_controls(Test *test, Platform *platform) {
     // Translation
     static constexpr f32 TRANSLATION_SPEED = 0.05f;
     f32 mod = key_down(platform, Key::SHIFT) ? 2 : 1;
-    Vec3<f32> move_vec = {};
+    test::Vec3 move_vec = {};
 
     if (key_down(platform, Key::D)) move_vec.x += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::A)) move_vec.x -= TRANSLATION_SPEED * mod;
@@ -342,12 +357,12 @@ static void camera_controls(Test *test, Platform *platform) {
     if (key_down(platform, Key::W)) move_vec.z += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::S)) move_vec.z -= TRANSLATION_SPEED * mod;
 
-    Matrix model_matrix = MATRIX_ID;
-    model_matrix = rotate(model_matrix, test->view.rotation.x, Axis::X);
-    model_matrix = rotate(model_matrix, test->view.rotation.y, Axis::Y);
-    model_matrix = rotate(model_matrix, test->view.rotation.z, Axis::Z);
-    Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    Vec3<f32> right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
+    test::Matrix model_matrix = test::default_matrix();
+    model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
+    model_matrix = test::rotate(model_matrix, test->view.rotation.y, Axis::Y);
+    model_matrix = test::rotate(model_matrix, test->view.rotation.z, Axis::Z);
+    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    test::Vec3 right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
     test->view.position += move_vec.z * forward;
     test->view.position += move_vec.x * right;
     test->view.position.y += move_vec.y;
@@ -370,53 +385,53 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
-    //      if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
-    // else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
+         if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
+    else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
+
+         if (key_down(platform, Key::NUM_1)) { print_line("single thread"); use_threads = false; }
+    else if (key_down(platform, Key::NUM_2)) { print_line("multi thread"); use_threads = true; }
 }
 
-static Matrix calculate_view_space_matrix(View *view) {
-    // View Matrix
-    Matrix model_matrix = MATRIX_ID;
-    model_matrix = rotate(model_matrix, view->rotation.x, Axis::X);
-    model_matrix = rotate(model_matrix, view->rotation.y, Axis::Y);
-    model_matrix = rotate(model_matrix, view->rotation.z, Axis::Z);
-    Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    Matrix view_matrix = look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
+static test::Matrix calculate_view_space_matrix(View *view) {
+    // View test::Matrix
+    test::Matrix model_matrix = test::default_matrix();
+    model_matrix = test::rotate(model_matrix, view->rotation.x, Axis::X);
+    model_matrix = test::rotate(model_matrix, view->rotation.y, Axis::Y);
+    model_matrix = test::rotate(model_matrix, view->rotation.z, Axis::Z);
+    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    test::Matrix view_matrix = test::look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
 
-    // Projection Matrix
-    Matrix projection_matrix = perspective_matrix(view->perspective_info);
+    // Projection test::Matrix
+    test::Matrix projection_matrix = test::perspective_matrix(view->perspective_info);
     projection_matrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
     return projection_matrix * view_matrix;
 }
 
-static void update_entity_matrixes(Test *test, Graphics *gfx, Vulkan *vk) {
-    Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+static DWORD update_entity_matrixes(void *data) {
+    auto state = (UpdateEntityMatrixesState *)data;
+    Test *test = state->test;
 
-    for (u32 i = 0; i < test->entities.count; ++i) {
+    for (u32 i = state->start; i < state->start + state->count && i < test->entities.count; ++i) {
         Entity *entity = test->entities.data + i;
 
-        Matrix m = translate(MATRIX_ID, entity->position);
-        m = rotate(m, entity->rotation.x, Axis::X);
-        m = rotate(m, entity->rotation.y, Axis::Y);
-        m = rotate(m, entity->rotation.z, Axis::Z);
+        test::Matrix m = test::translate(test::default_matrix(), entity->position);
+        m = test::rotate(m, entity->rotation.x, Axis::X);
+        m = test::rotate(m, entity->rotation.y, Axis::Y);
+        m = test::rotate(m, entity->rotation.z, Axis::Z);
 
-        test->entity_matrixes.data[i] = view_space_matrix * m;
+        test->entity_matrixes.data[i] = state->view_space_matrix * m;
     }
 
-    begin_temp_cmd_buf(gfx->temp_cmd_buf);
-        write_to_device_region(vk, gfx->temp_cmd_buf,
-                               gfx->staging_region, 0,
-                               test->uniform_buffer.entity_matrixes->data[gfx->sync.swap_img_idx], 0,
-                               test->entity_matrixes.data, byte_size(&test->entity_matrixes));
-    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
+    return 0;
 }
 
-static void update_test_state(Test *test, Graphics *gfx, Vulkan *vk) {
-    update_entity_matrixes(test, gfx, vk);
-}
+static DWORD record_render_cmds(void *data) {
+    auto state = (RecordRenderCommandsState *)data;
+    Test *test = state->test;
+    Graphics *gfx = state->gfx;
+    Vulkan *vk = state->vk;
 
-static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
     VkCommandBuffer cmd_buf = gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -459,6 +474,50 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
     vkCmdEndRenderPass(cmd_buf);
 
     vkEndCommandBuffer(cmd_buf);
+    return 0;
+}
+
+static void update(Test *test, Graphics *gfx, Vulkan *vk) {
+    RecordRenderCommandsState record_render_commands_state = { test, gfx, vk };
+    test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+
+    if (use_threads) {
+        FixedArray<UpdateEntityMatrixesState, 64> update_entity_matrixes_states = {};
+        FixedArray<HANDLE, 65> threads = {};
+        push(&threads, CreateThread(NULL, 0, record_render_cmds, &record_render_commands_state, 0, NULL));
+
+        u32 start = 0;
+        u32 count = 256;
+        while (start < test->entities.count) {
+            UpdateEntityMatrixesState *update_entity_matrixes_state = push(&update_entity_matrixes_states, {
+                .test = test,
+                .start = start,
+                .count = count,
+                .view_space_matrix = view_space_matrix,
+            });
+
+            push(&threads, CreateThread(NULL, 0, update_entity_matrixes, update_entity_matrixes_state, 0, NULL));
+            start += count;
+        }
+
+        WaitForMultipleObjects(threads.count, threads.data, TRUE, INFINITE);
+
+        for (u32 i = 0; i < threads.count; ++i)
+            CloseHandle(threads[i]);
+    }
+    else {
+        UpdateEntityMatrixesState update_entity_matrixes_state = { test, 0, test->entities.count, view_space_matrix };
+        update_entity_matrixes(&update_entity_matrixes_state);
+        record_render_cmds(&record_render_commands_state);
+    }
+
+    // Write entity matrixes to UBO.
+    begin_temp_cmd_buf(gfx->temp_cmd_buf);
+        write_to_device_region(vk, gfx->temp_cmd_buf,
+                               gfx->staging_region, 0,
+                               test->uniform_buffer.entity_matrixes->data[gfx->sync.swap_img_idx], 0,
+                               test->entity_matrixes.data, byte_size(&test->entity_matrixes));
+    submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
 s32 main() {
@@ -513,8 +572,7 @@ s32 main() {
 
         // Update
         next_frame(gfx, vk);
-        update_test_state(test, gfx, vk);
-        record_render_cmds(test, gfx, vk);
+        update(test, gfx, vk);
         submit_render_cmds(gfx, vk);
     }
 

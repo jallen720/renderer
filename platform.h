@@ -96,7 +96,7 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
                 break; // System inputs should still be processed via DefWindowProc().
             }
 
-            // // Mouse Button Events
+            // Mouse Button Events
             mouse_button_handlers(LBUTTON, 0)
             mouse_button_handlers(RBUTTON, 1)
             mouse_button_handlers(MBUTTON, 2)
