@@ -329,6 +329,7 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
         info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(gfx->mem.temp, 1);
+        info.push_constant_ranges = create_array<VkPushConstantRange>(gfx->mem.temp, 1);
         info.vertex_bindings = create_array<VkVertexInputBindingDescription>(gfx->mem.temp, 1);
         info.vertex_attributes = create_array<VkVertexInputAttributeDescription>(gfx->mem.temp, 2);
         info.viewports = create_array<VkViewport>(gfx->mem.temp, 1);
@@ -339,6 +340,11 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
         push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
         push(info.descriptor_set_layouts, gfx->descriptor_set_layout.entity);
+        push(info.push_constant_ranges, {
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .offset = 0,
+            .size = 64
+        });
         push(info.vertex_bindings, default_vertex_binding);
         push(info.vertex_attributes, {
             .location = 0,

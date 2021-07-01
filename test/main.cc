@@ -14,6 +14,111 @@
 using namespace ctk;
 
 ////////////////////////////////////////////////////////////
+/// Benchmarking
+////////////////////////////////////////////////////////////
+struct Benchmark {
+    cstr name;
+    clock_t start;
+    Benchmark *parent;
+    Benchmark *children;
+    Benchmark *next;
+    f64 ms;
+};
+
+struct FrameBenchmark {
+    Stack *mem;
+    Benchmark *current;
+    Benchmark *root;
+};
+
+static void reset_frame_benchmark(FrameBenchmark *fb) {
+    fb->mem->count = 0;
+    fb->current = NULL;
+}
+
+static FrameBenchmark *create_frame_benchmark(Allocator *mem, u32 max_benchmarks) {
+    auto fb = allocate<FrameBenchmark>(mem, 1);
+    fb->mem = create_stack(mem, sizeof(Benchmark) * max_benchmarks);
+    return fb;
+}
+
+static void push_benchmark(Benchmark *parent, Benchmark *bm) {
+    Benchmark *end = parent->children;
+
+    if (end == NULL) {
+        parent->children = bm;
+        return;
+    }
+
+    while (end->next)
+        end = end->next;
+
+    end->next = bm;
+}
+
+static void start_benchmark(FrameBenchmark *fb, cstr name) {
+    auto bm = allocate<Benchmark>(fb->mem, 1);
+    bm->name = name;
+    bm->start = clock();
+    bm->parent = fb->current;
+
+    // Adding as child to current benchmark.
+    if (fb->current != NULL)
+        push_benchmark(fb->current, bm);
+    // This is the first benchmark, set as root.
+    else
+        fb->root = bm;
+
+    fb->current = bm;
+}
+
+static f64 clocks_to_ms(clock_t start, clock_t end) {
+    return ((f64)end - start) / (CLOCKS_PER_SEC / 1000.0);
+}
+
+static void end_benchmark(FrameBenchmark *fb) {
+    clock_t end = clock();
+    fb->current->ms = clocks_to_ms(fb->current->start, end);
+    fb->current = fb->current->parent;
+}
+
+static void print_frame_benchmark(FrameBenchmark *fb) {
+    Benchmark *parent = NULL;
+    Benchmark *bm = fb->root;
+    u32 tab = 0;
+
+    while (bm) {
+        print_line(tab, "%s: %fms", bm->name, bm->ms);
+
+        // Benchmark has children, print those before going to next benchmark.
+        if (bm->children) {
+            parent = bm;
+            bm = bm->children;
+            ++tab;
+        }
+        // Done printing benchmark and its children, go to next benchmark.
+        else if (bm->next) {
+            bm = bm->next;
+        }
+        // Benchmark is end of parent children.
+        else {
+            // Walk up tree to parent with next benchmark.
+            while (parent && parent->next == NULL)
+                parent = parent->parent;
+
+            if (parent) {
+                bm = parent->next;
+                parent = parent->parent;
+                --tab;
+            }
+            else {
+                bm = NULL;
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////
 /// Data
 ////////////////////////////////////////////////////////////
 struct Memory {
@@ -77,26 +182,13 @@ struct Test {
     test::Vec3 color;
     FixedArray<Entity, MAX_ENTITIES> entities;
     FixedArray<test::Matrix, MAX_ENTITIES> entity_matrixes;
-};
 
-struct RecordRenderCommandsState {
-    Test *test;
-    Graphics *gfx;
-    Vulkan *vk;
+    FrameBenchmark *frame_benchmark;
 };
 
 ////////////////////////////////////////////////////////////
 /// Utils
 ////////////////////////////////////////////////////////////
-struct UpdateEntityMatrixesState {
-    Test *test;
-    u32 start;
-    u32 count;
-    test::Matrix view_space_matrix;
-};
-
-static bool use_threads = false;
-
 static void init_mesh(Mesh *mesh, Graphics *gfx, Vulkan *vk, Array<Vertex> *vertexes, Array<u32> *indexes) {
     mesh->vertexes = vertexes,
     mesh->indexes = indexes,
@@ -313,6 +405,8 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
 
     test->input.last_mouse_position = get_mouse_position(platform);
     create_entities(test);
+    test->frame_benchmark = create_frame_benchmark(mem->fixed, 17000);
+
     return test;
 }
 
@@ -394,8 +488,8 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
          if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
     else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
 
-         if (key_down(platform, Key::NUM_1)) { print_line("single thread"); use_threads = false; }
-    else if (key_down(platform, Key::NUM_2)) { print_line("multi thread"); use_threads = true; }
+    //      if (key_down(platform, Key::NUM_1)) { print_line("single thread"); use_threads = false; }
+    // else if (key_down(platform, Key::NUM_2)) { print_line("multi thread"); use_threads = true; }
 }
 
 static test::Matrix calculate_view_space_matrix(View *view) {
@@ -414,11 +508,8 @@ static test::Matrix calculate_view_space_matrix(View *view) {
     return projection_matrix * view_matrix;
 }
 
-static DWORD update_entity_matrixes(void *data) {
-    auto state = (UpdateEntityMatrixesState *)data;
-    Test *test = state->test;
-
-    for (u32 i = state->start; i < state->start + state->count && i < test->entities.count; ++i) {
+static void update_entity_matrixes(Test *test) {
+    for (u32 i = 0; i < test->entities.count; ++i) {
         Entity *entity = test->entities.data + i;
 
         test::Matrix m = test::translate(test::default_matrix(), entity->position);
@@ -426,18 +517,11 @@ static DWORD update_entity_matrixes(void *data) {
         m = test::rotate(m, entity->rotation.y, Axis::Y);
         m = test::rotate(m, entity->rotation.z, Axis::Z);
 
-        test->entity_matrixes.data[i] = state->view_space_matrix * m;
+        test->entity_matrixes.data[i] = m;
     }
-
-    return 0;
 }
 
-static DWORD record_render_cmds(void *data) {
-    auto state = (RecordRenderCommandsState *)data;
-    Test *test = state->test;
-    Graphics *gfx = state->gfx;
-    Vulkan *vk = state->vk;
-
+static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
     VkCommandBuffer cmd_buf = gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -455,8 +539,13 @@ static DWORD record_render_cmds(void *data) {
         .offset = { 0, 0 },
         .extent = vk->swapchain.extent,
     };
+
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->handle);
+
+        test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+        vkCmdPushConstants(cmd_buf, gfx->pipeline.entity->layout, VK_SHADER_STAGE_VERTEX_BIT,
+                           0, 64, &view_space_matrix);
 
         // Bind descriptor sets.
         VkDescriptorSet descriptor_sets[] = {
@@ -480,42 +569,11 @@ static DWORD record_render_cmds(void *data) {
     vkCmdEndRenderPass(cmd_buf);
 
     vkEndCommandBuffer(cmd_buf);
-    return 0;
 }
 
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
-    RecordRenderCommandsState record_render_commands_state = { test, gfx, vk };
-    test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
-
-    if (use_threads) {
-        FixedArray<UpdateEntityMatrixesState, 64> update_entity_matrixes_states = {};
-        FixedArray<HANDLE, 65> threads = {};
-        push(&threads, CreateThread(NULL, 0, record_render_cmds, &record_render_commands_state, 0, NULL));
-
-        u32 start = 0;
-        u32 count = 256;
-        while (start < test->entities.count) {
-            UpdateEntityMatrixesState *update_entity_matrixes_state = push(&update_entity_matrixes_states, {
-                .test = test,
-                .start = start,
-                .count = count,
-                .view_space_matrix = view_space_matrix,
-            });
-
-            push(&threads, CreateThread(NULL, 0, update_entity_matrixes, update_entity_matrixes_state, 0, NULL));
-            start += count;
-        }
-
-        WaitForMultipleObjects(threads.count, threads.data, TRUE, INFINITE);
-
-        for (u32 i = 0; i < threads.count; ++i)
-            CloseHandle(threads[i]);
-    }
-    else {
-        UpdateEntityMatrixesState update_entity_matrixes_state = { test, 0, test->entities.count, view_space_matrix };
-        update_entity_matrixes(&update_entity_matrixes_state);
-        record_render_cmds(&record_render_commands_state);
-    }
+    record_render_cmds(test, gfx, vk);
+    update_entity_matrixes(test);
 
     // Write entity matrixes to UBO.
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
