@@ -274,7 +274,8 @@ static VkDeviceQueueCreateInfo default_queue_info(u32 queue_fam_idx) {
 }
 
 static u32 find_memory_type_index(VkPhysicalDeviceMemoryProperties mem_props, VkMemoryRequirements mem_reqs,
-                                  VkMemoryPropertyFlags mem_prop_flags) {
+                                  VkMemoryPropertyFlags mem_prop_flags)
+{
     // Find memory type index from device based on memory property flags.
     for (u32 mem_type_idx = 0; mem_type_idx < mem_props.memoryTypeCount; ++mem_type_idx) {
         // Ensure index refers to memory type from memory requirements.

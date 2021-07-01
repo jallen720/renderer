@@ -222,3 +222,7 @@ static void set_mouse_visible(bool visible) {
 static bool window_is_active(Window *window) {
     return GetActiveWindow() == window->handle;
 }
+
+static void set_window_title(Window *window, cstr title) {
+    SetWindowTextA(window->handle, title);
+}

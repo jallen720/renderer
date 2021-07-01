@@ -13,6 +13,9 @@
 
 using namespace ctk;
 
+////////////////////////////////////////////////////////////
+/// Data
+////////////////////////////////////////////////////////////
 struct Memory {
     Allocator *fixed;
     Allocator *temp;
@@ -82,6 +85,9 @@ struct RecordRenderCommandsState {
     Vulkan *vk;
 };
 
+////////////////////////////////////////////////////////////
+/// Utils
+////////////////////////////////////////////////////////////
 struct UpdateEntityMatrixesState {
     Test *test;
     u32 start;
@@ -520,6 +526,9 @@ static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
+////////////////////////////////////////////////////////////
+/// Main
+////////////////////////////////////////////////////////////
 s32 main() {
     // Initialize Memory
     Allocator *fixed_mem = create_stack_allocator(gigabyte(1));
@@ -554,6 +563,8 @@ s32 main() {
     Test *test = create_test(mem, gfx, vk, platform);
 
     // Main Loop
+    clock_t start = clock();
+    u32 frames = 0;
     while (1) {
         process_events(platform->window);
 
@@ -574,6 +585,20 @@ s32 main() {
         next_frame(gfx, vk);
         update(test, gfx, vk);
         submit_render_cmds(gfx, vk);
+
+        // Update FPS display.
+        clock_t end = clock();
+        f64 frame_ms = clocks_to_ms(start, end);
+        if (frame_ms >= 500.0) {
+            char buf[128] = {};
+            sprintf(buf, "%.2f FPS", (frames / (frame_ms / 500)) * 2);
+            set_window_title(platform->window, buf);
+            start = end;
+            frames = 0;
+        }
+        else {
+            ++frames;
+        }
     }
 
     return 0;
