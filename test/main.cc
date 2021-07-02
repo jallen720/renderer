@@ -9,7 +9,7 @@
 #include "ctk/containers.h"
 #include "ctk/math.h"
 
-#include "renderer/glm_test.h"
+#include "renderer/test/glm_test.h"
 
 using namespace ctk;
 
@@ -574,13 +574,13 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
-// start_benchmark(test->frame_benchmark, "record_render_cmds()");
-    record_render_cmds(test, gfx, vk);
-// end_benchmark(test->frame_benchmark);
-
     // Update uniform buffer data.
     test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
     update_entity_matrixes(test);
+
+// start_benchmark(test->frame_benchmark, "record_render_cmds()");
+    record_render_cmds(test, gfx, vk);
+// end_benchmark(test->frame_benchmark);
 
     // Write to uniform buffers.
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
@@ -674,9 +674,6 @@ static Job *create_job(Allocator *allocator, JobInfo info) {
     return job;
 }
 
-////////////////////////////////////////////////////////////
-/// Main
-////////////////////////////////////////////////////////////
 static void thread_print(void *context, u32 start, u32 count) {
     auto ints = (u32 *)context;
 
@@ -684,6 +681,28 @@ static void thread_print(void *context, u32 start, u32 count) {
         print_line("thread(start=%u): ints[%u]: %u", start, i, ints[i]);
 }
 
+static void job_test(Allocator *mem) {
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    print_line("processor count: %u", info.dwNumberOfProcessors);
+
+    u32 ints[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
+
+    Job *job = create_job(mem, {
+        .context = ints,
+        .data_size = CTK_ARRAY_SIZE(ints),
+        .thread_count = info.dwNumberOfProcessors,
+        .fn = thread_print
+    });
+
+    CTK_REPEAT(3)
+        start_job(job);
+    exit(0);
+}
+
+////////////////////////////////////////////////////////////
+/// Main
+////////////////////////////////////////////////////////////
 s32 main() {
     // Initialize Memory
     Allocator *fixed_mem = create_stack_allocator(gigabyte(1));
@@ -694,19 +713,7 @@ s32 main() {
     mem->vulkan = create_stack_allocator(mem->fixed, megabyte(4));
     mem->graphics = create_stack_allocator(mem->fixed, megabyte(4));
 
-
-    u32 ints[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
-
-    Job *job = create_job(fixed_mem, {
-        .context = ints,
-        .data_size = CTK_ARRAY_SIZE(ints),
-        .thread_count = 12,
-        .fn = thread_print
-    });
-
-    CTK_REPEAT(3)
-        start_job(job);
-    exit(0);
+    // job_test(fixed_mem);
 
     // Create Modules
     Platform *platform = create_platform(mem->platform, {
