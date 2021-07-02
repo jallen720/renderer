@@ -41,6 +41,7 @@ struct PhysicalDevice {
 
     VkPhysicalDeviceType type;
     u32 min_uniform_buffer_offset_alignment;
+    u32 max_push_constant_size;
 
     VkPhysicalDeviceFeatures features;
     VkPhysicalDeviceMemoryProperties mem_properties;
@@ -446,6 +447,7 @@ static void load_physical_device(Vulkan *vk, PhysicalDeviceFeature *requested_fe
         vkGetPhysicalDeviceProperties(vk_physical_device, &properties);
         physical_device->type = properties.deviceType;
         physical_device->min_uniform_buffer_offset_alignment = properties.limits.minUniformBufferOffsetAlignment;
+        physical_device->max_push_constant_size = properties.limits.maxPushConstantsSize;
 
 
         vkGetPhysicalDeviceFeatures(vk_physical_device, &physical_device->features);

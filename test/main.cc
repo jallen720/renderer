@@ -165,6 +165,7 @@ struct Test {
     } image;
 
     struct {
+        Array<Region *> *view_space_matrix;
         Array<Region *> *entity_matrixes;
     } uniform_buffer;
 
@@ -179,7 +180,6 @@ struct Test {
         Vec2<s32> mouse_delta;
     } input;
 
-    test::Vec3 color;
     FixedArray<Entity, MAX_ENTITIES> entities;
     FixedArray<test::Matrix, MAX_ENTITIES> entity_matrixes;
 
@@ -340,8 +340,14 @@ static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
-    test->uniform_buffer.entity_matrixes = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
+    test->uniform_buffer.view_space_matrix = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
+    for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
+        u32 element_size = multiple_of(sizeof(test::Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
+        test->uniform_buffer.view_space_matrix->data[i] =
+            allocate_uniform_buffer_region(vk, gfx->buffer.device, element_size);
+    }
 
+    test->uniform_buffer.entity_matrixes = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
     for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
         u32 element_size = multiple_of(sizeof(test::Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
         test->uniform_buffer.entity_matrixes->data[i] =
@@ -358,8 +364,8 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
         for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
             DescriptorBinding bindings[] = {
                 {
-                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                    .uniform_buffer = test->uniform_buffer.entity_matrixes->data[i]
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    .uniform_buffer = test->uniform_buffer.view_space_matrix->data[i]
                 },
                 {
                     .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -405,7 +411,7 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
 
     test->input.last_mouse_position = get_mouse_position(platform);
     create_entities(test);
-    test->frame_benchmark = create_frame_benchmark(mem->fixed, 17000);
+    test->frame_benchmark = create_frame_benchmark(mem->fixed, 64);
 
     return test;
 }
@@ -543,27 +549,23 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
     vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->handle);
 
-        test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
-        vkCmdPushConstants(cmd_buf, gfx->pipeline.entity->layout, VK_SHADER_STAGE_VERTEX_BIT,
-                           0, 64, &view_space_matrix);
-
         // Bind descriptor sets.
         VkDescriptorSet descriptor_sets[] = {
             gfx->descriptor_set.entity->data[gfx->sync.swap_img_idx],
         };
+        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
+                                0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
+                                0, NULL);
+
+        // Bind mesh data.
+        Mesh *mesh = &test->mesh.quad;
+        vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
+        vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
+                             VK_INDEX_TYPE_UINT32);
 
         for (u32 i = 0; i < test->entities.count; ++i) {
-            u32 offset = i * 64;//vk->physical_device.min_uniform_buffer_offset_alignment;
-            vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
-                                    0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
-                                    1, &offset);
-
-            // Bind mesh data.
-            Mesh *mesh = &test->mesh.quad;
-            vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
-            vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
-                                 VK_INDEX_TYPE_UINT32);
-
+            vkCmdPushConstants(cmd_buf, gfx->pipeline.entity->layout, VK_SHADER_STAGE_VERTEX_BIT,
+                               0, 64, &test->entity_matrixes.data[i]);
             vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
         }
     vkCmdEndRenderPass(cmd_buf);
@@ -572,13 +574,22 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
+// start_benchmark(test->frame_benchmark, "record_render_cmds()");
     record_render_cmds(test, gfx, vk);
+// end_benchmark(test->frame_benchmark);
+
+    // Update uniform buffer data.
+    test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
     update_entity_matrixes(test);
 
-    // Write entity matrixes to UBO.
+    // Write to uniform buffers.
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, gfx->temp_cmd_buf,
                                gfx->staging_region, 0,
+                               test->uniform_buffer.view_space_matrix->data[gfx->sync.swap_img_idx], 0,
+                               &view_space_matrix, sizeof(view_space_matrix));
+        write_to_device_region(vk, gfx->temp_cmd_buf,
+                               gfx->staging_region, sizeof(view_space_matrix),
                                test->uniform_buffer.entity_matrixes->data[gfx->sync.swap_img_idx], 0,
                                test->entity_matrixes.data, byte_size(&test->entity_matrixes));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
@@ -624,6 +635,7 @@ s32 main() {
     clock_t start = clock();
     u32 frames = 0;
     while (1) {
+// start_benchmark(test->frame_benchmark, "frame");
         process_events(platform->window);
 
         if (!window_is_active(platform->window))
@@ -657,6 +669,9 @@ s32 main() {
         else {
             ++frames;
         }
+// end_benchmark(test->frame_benchmark);
+// print_frame_benchmark(test->frame_benchmark);
+// reset_frame_benchmark(test->frame_benchmark);
     }
 
     return 0;
