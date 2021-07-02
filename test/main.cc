@@ -595,9 +595,95 @@ static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
+struct Job;
+
+struct ThreadState {
+    Job *job;
+    u32 start;
+    u32 count;
+};
+
+struct JobInfo {
+    void *context;
+    u32 data_size;
+    u32 thread_count;
+    void (*fn)(void *context, u32 start, u32 count);
+};
+
+struct Job {
+    void *context;
+    u32 data_size;
+    u32 thread_count;
+    void (*fn)(void *context, u32 start, u32 count);
+
+    Array<HANDLE> *threads;
+    Array<ThreadState> *thread_states;
+};
+
+static DWORD start_thread(void *data) {
+    auto state = (ThreadState *)data;
+
+    state->job->fn(state->job->context, state->start, state->count);
+
+    return 0;
+}
+
+static void start_job(Job *job) {
+    clear(job->threads);
+    clear(job->thread_states);
+
+    u32 thread_data_size = multiple_of(job->data_size, job->thread_count) / job->thread_count;
+
+    u32 start = 0;
+    u32 remaining = job->data_size;
+    while (remaining > 0) {
+        push(job->threads, CreateThread(
+            NULL,
+            0,
+            start_thread,
+            push(job->thread_states, {
+                .job = job,
+                .start = start,
+                .count = min(thread_data_size, remaining)
+            }),
+            0,
+            NULL
+        ));
+
+        remaining = thread_data_size > remaining ? 0 : remaining - thread_data_size;
+        start += thread_data_size;
+    }
+
+    WaitForMultipleObjects(job->threads->count, job->threads->data, TRUE, INFINITE);
+
+    for (u32 i = 0; i < job->threads->count; ++i)
+        CloseHandle(job->threads->data[i]);
+}
+
+static Job *create_job(Allocator *allocator, JobInfo info) {
+    auto job = allocate<Job>(allocator, 1);
+
+    job->context = info.context;
+    job->data_size = info.data_size;
+    job->thread_count = info.thread_count;
+    job->fn = info.fn;
+
+    job->threads = create_array<HANDLE>(allocator, info.thread_count);
+    job->thread_states = create_array<ThreadState>(allocator, info.thread_count);
+
+    return job;
+}
+
 ////////////////////////////////////////////////////////////
 /// Main
 ////////////////////////////////////////////////////////////
+static void thread_print(void *context, u32 start, u32 count) {
+    auto ints = (u32 *)context;
+
+    for (u32 i = start; i < start + count; ++i)
+        print_line("thread(start=%u): ints[%u]: %u", start, i, ints[i]);
+}
+
 s32 main() {
     // Initialize Memory
     Allocator *fixed_mem = create_stack_allocator(gigabyte(1));
@@ -607,6 +693,20 @@ s32 main() {
     mem->platform = create_stack_allocator(mem->fixed, kilobyte(2));
     mem->vulkan = create_stack_allocator(mem->fixed, megabyte(4));
     mem->graphics = create_stack_allocator(mem->fixed, megabyte(4));
+
+
+    u32 ints[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
+
+    Job *job = create_job(fixed_mem, {
+        .context = ints,
+        .data_size = CTK_ARRAY_SIZE(ints),
+        .thread_count = 12,
+        .fn = thread_print
+    });
+
+    CTK_REPEAT(3)
+        start_job(job);
+    exit(0);
 
     // Create Modules
     Platform *platform = create_platform(mem->platform, {
