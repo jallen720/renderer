@@ -363,10 +363,10 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
     {
         for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
             DescriptorBinding bindings[] = {
-                {
-                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    .uniform_buffer = test->uniform_buffer.view_space_matrix->data[i]
-                },
+                // {
+                //     .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                //     .uniform_buffer = test->uniform_buffer.view_space_matrix->data[i]
+                // },
                 {
                     .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                     .image_sampler = &test->image_sampler.test
@@ -514,7 +514,14 @@ static test::Matrix calculate_view_space_matrix(View *view) {
     return projection_matrix * view_matrix;
 }
 
-static void update_entity_matrixes(Test *test) {
+struct UpdateEntityMatrixesState {
+    Test *test;
+    test::Matrix view_space_matrix;
+    u32 start;
+    u32 count;
+};
+
+static void update_entity_matrixes(Test *test, test::Matrix view_space_matrix) {
     for (u32 i = 0; i < test->entities.count; ++i) {
         Entity *entity = test->entities.data + i;
 
@@ -523,7 +530,7 @@ static void update_entity_matrixes(Test *test) {
         m = test::rotate(m, entity->rotation.y, Axis::Y);
         m = test::rotate(m, entity->rotation.z, Axis::Z);
 
-        test->entity_matrixes.data[i] = m;
+        test->entity_matrixes.data[i] = view_space_matrix * m;
     }
 }
 
@@ -576,7 +583,7 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     // Update uniform buffer data.
     test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
-    update_entity_matrixes(test);
+    update_entity_matrixes(test, view_space_matrix);
 
 // start_benchmark(test->frame_benchmark, "record_render_cmds()");
     record_render_cmds(test, gfx, vk);

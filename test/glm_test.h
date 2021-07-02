@@ -72,7 +72,15 @@ Matrix look_at(Vec3 position, Vec3 point, Vec3 up) {
         return { .ctk = ctk::look_at(position.ctk, point.ctk, up.ctk) };
 }
 
-static Vec3 operator*(f32 r, const Vec3 &l) {
+static Vec3 operator*(f32 l, const Vec3 &r) {
+    return {
+        l * r.x,
+        l * r.y,
+        l * r.z,
+    };
+}
+
+static Vec3 operator*(const Vec3 &l, f32 r) {
     return {
         l.x * r,
         l.y * r,

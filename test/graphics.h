@@ -141,7 +141,7 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
     // Entity
     {
         DescriptorInfo descriptor_infos[] = {
-            { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT },
+            // { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT },
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         };
 
