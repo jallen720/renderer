@@ -416,65 +416,6 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
     return test;
 }
 
-struct RangeTask {
-    using Func = void (*)(void *context, u32 start, u32 count);
-
-    Array<HANDLE> *threads;
-    void *data;
-    Func func;
-    u32 range;
-
-    enum struct State {
-        IDLE,
-        READY,
-        DONE,
-    } state;
-};
-
-struct RangeTaskThreadInfo {
-    RangeTask *task;
-    u32 index;
-};
-
-static DWORD range_task_thread(void *data) {
-    auto info = (RangeTaskThreadInfo *)data;
-    RangeTask *task = info->task;
-    u32 index = info->index;
-
-    while (1) {
-        if (task->state == RangeTask::State::READY) {
-
-        }
-        else {
-            Sleep(1);
-        }
-    }
-
-    return 0;
-}
-
-static Task *create_task(Allocator *allocator, u32 thread_count) {
-    auto task = allocate<Task>(allocator, 1);
-    task->threads = create_array<HANDLE>(allocator, thread_count);
-
-}
-
-static Task *create_task(u32 thread_count) {
-    return create_task(&system_allocator, thread_count);
-}
-
-static void process(RangeTask *task, void *data, u32 range, RangeTask::Func func) {
-    task->data = data;
-    task->func = func;
-    task->range = range;
-    task->done = false;
-
-    u32 thread_data_size = multiple_of(range, task->threads->count) / task->threads->count;
-
-    u32 start = 0;
-    u32 remaining = range;
-}
-
 static bool wrap_mouse_position(Vec2<s32> *mouse_position, u32 max_width, u32 max_height) {
     bool wrapped = false;
 
@@ -573,13 +514,6 @@ static test::Matrix calculate_view_space_matrix(View *view) {
     return projection_matrix * view_matrix;
 }
 
-struct UpdateEntityMatrixesState {
-    Test *test;
-    test::Matrix view_space_matrix;
-    u32 start;
-    u32 count;
-};
-
 static void update_entity_matrixes(Test *test, test::Matrix view_space_matrix) {
     for (u32 i = 0; i < test->entities.count; ++i) {
         Entity *entity = test->entities.data + i;
@@ -642,11 +576,16 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     // Update uniform buffer data.
     test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+start_benchmark(test->frame_benchmark, "update_entity_matrixes()");
     update_entity_matrixes(test, view_space_matrix);
+end_benchmark(test->frame_benchmark);
 
+start_benchmark(test->frame_benchmark, "record_render_cmds()");
     record_render_cmds(test, gfx, vk);
+end_benchmark(test->frame_benchmark);
 
     // Write to uniform buffers.
+start_benchmark(test->frame_benchmark, "write_to_device_region()");
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
         write_to_device_region(vk, gfx->temp_cmd_buf,
                                gfx->staging_region, 0,
@@ -657,6 +596,7 @@ static void update(Test *test, Graphics *gfx, Vulkan *vk) {
                                test->uniform_buffer.entity_matrixes->data[gfx->sync.swap_img_idx], 0,
                                test->entity_matrixes.data, byte_size(&test->entity_matrixes));
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
+end_benchmark(test->frame_benchmark);
 }
 
 ////////////////////////////////////////////////////////////
@@ -699,7 +639,7 @@ s32 main() {
     clock_t start = clock();
     u32 frames = 0;
     while (1) {
-// start_benchmark(test->frame_benchmark, "frame");
+start_benchmark(test->frame_benchmark, "frame");
         process_events(platform->window);
 
         if (!window_is_active(platform->window))
@@ -733,9 +673,9 @@ s32 main() {
         else {
             ++frames;
         }
-// end_benchmark(test->frame_benchmark);
-// print_frame_benchmark(test->frame_benchmark);
-// reset_frame_benchmark(test->frame_benchmark);
+end_benchmark(test->frame_benchmark);
+print_frame_benchmark(test->frame_benchmark);
+reset_frame_benchmark(test->frame_benchmark);
     }
 
     return 0;
