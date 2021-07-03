@@ -36,6 +36,7 @@ struct Platform {
     HINSTANCE instance;
     Window *window;
     s32 key_map[(s32)Key::COUNT];
+    u32 thread_count;
 };
 
 static Platform *instance;
@@ -169,6 +170,11 @@ static Platform *create_platform(Allocator *module_mem, WindowInfo window_info) 
 
     // Map Keys to WIN32 Keys
     map_keys(platform);
+
+    // Get System Info
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    platform->thread_count = info.dwNumberOfProcessors;
 
     // Store platform instance for use with window callbacks.
     instance = platform;
