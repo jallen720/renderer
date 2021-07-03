@@ -416,6 +416,65 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
     return test;
 }
 
+struct RangeTask {
+    using Func = void (*)(void *context, u32 start, u32 count);
+
+    Array<HANDLE> *threads;
+    void *data;
+    Func func;
+    u32 range;
+
+    enum struct State {
+        IDLE,
+        READY,
+        DONE,
+    } state;
+};
+
+struct RangeTaskThreadInfo {
+    RangeTask *task;
+    u32 index;
+};
+
+static DWORD range_task_thread(void *data) {
+    auto info = (RangeTaskThreadInfo *)data;
+    RangeTask *task = info->task;
+    u32 index = info->index;
+
+    while (1) {
+        if (task->state == RangeTask::State::READY) {
+
+        }
+        else {
+            Sleep(1);
+        }
+    }
+
+    return 0;
+}
+
+static Task *create_task(Allocator *allocator, u32 thread_count) {
+    auto task = allocate<Task>(allocator, 1);
+    task->threads = create_array<HANDLE>(allocator, thread_count);
+
+}
+
+static Task *create_task(u32 thread_count) {
+    return create_task(&system_allocator, thread_count);
+}
+
+static void process(RangeTask *task, void *data, u32 range, RangeTask::Func func) {
+    task->data = data;
+    task->func = func;
+    task->range = range;
+    task->done = false;
+
+    u32 thread_data_size = multiple_of(range, task->threads->count) / task->threads->count;
+
+    u32 start = 0;
+    u32 remaining = range;
+}
+
 static bool wrap_mouse_position(Vec2<s32> *mouse_position, u32 max_width, u32 max_height) {
     bool wrapped = false;
 
@@ -585,9 +644,7 @@ static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
     update_entity_matrixes(test, view_space_matrix);
 
-// start_benchmark(test->frame_benchmark, "record_render_cmds()");
     record_render_cmds(test, gfx, vk);
-// end_benchmark(test->frame_benchmark);
 
     // Write to uniform buffers.
     begin_temp_cmd_buf(gfx->temp_cmd_buf);
@@ -602,111 +659,6 @@ static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     submit_temp_cmd_buf(gfx->temp_cmd_buf, vk->queue.graphics);
 }
 
-struct Job;
-
-struct ThreadState {
-    Job *job;
-    u32 start;
-    u32 count;
-};
-
-struct JobInfo {
-    void *context;
-    u32 data_size;
-    u32 thread_count;
-    void (*fn)(void *context, u32 start, u32 count);
-};
-
-struct Job {
-    void *context;
-    u32 data_size;
-    u32 thread_count;
-    void (*fn)(void *context, u32 start, u32 count);
-
-    Array<HANDLE> *threads;
-    Array<ThreadState> *thread_states;
-};
-
-static DWORD start_thread(void *data) {
-    auto state = (ThreadState *)data;
-
-    state->job->fn(state->job->context, state->start, state->count);
-
-    return 0;
-}
-
-static void start_job(Job *job) {
-    clear(job->threads);
-    clear(job->thread_states);
-
-    u32 thread_data_size = multiple_of(job->data_size, job->thread_count) / job->thread_count;
-
-    u32 start = 0;
-    u32 remaining = job->data_size;
-    while (remaining > 0) {
-        push(job->threads, CreateThread(
-            NULL,
-            0,
-            start_thread,
-            push(job->thread_states, {
-                .job = job,
-                .start = start,
-                .count = min(thread_data_size, remaining)
-            }),
-            0,
-            NULL
-        ));
-
-        remaining = thread_data_size > remaining ? 0 : remaining - thread_data_size;
-        start += thread_data_size;
-    }
-
-    WaitForMultipleObjects(job->threads->count, job->threads->data, TRUE, INFINITE);
-
-    for (u32 i = 0; i < job->threads->count; ++i)
-        CloseHandle(job->threads->data[i]);
-}
-
-static Job *create_job(Allocator *allocator, JobInfo info) {
-    auto job = allocate<Job>(allocator, 1);
-
-    job->context = info.context;
-    job->data_size = info.data_size;
-    job->thread_count = info.thread_count;
-    job->fn = info.fn;
-
-    job->threads = create_array<HANDLE>(allocator, info.thread_count);
-    job->thread_states = create_array<ThreadState>(allocator, info.thread_count);
-
-    return job;
-}
-
-static void thread_print(void *context, u32 start, u32 count) {
-    auto ints = (u32 *)context;
-
-    for (u32 i = start; i < start + count; ++i)
-        print_line("thread(start=%u): ints[%u]: %u", start, i, ints[i]);
-}
-
-static void job_test(Allocator *mem) {
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    print_line("processor count: %u", info.dwNumberOfProcessors);
-
-    u32 ints[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 };
-
-    Job *job = create_job(mem, {
-        .context = ints,
-        .data_size = CTK_ARRAY_SIZE(ints),
-        .thread_count = info.dwNumberOfProcessors,
-        .fn = thread_print
-    });
-
-    CTK_REPEAT(3)
-        start_job(job);
-    exit(0);
-}
-
 ////////////////////////////////////////////////////////////
 /// Main
 ////////////////////////////////////////////////////////////
@@ -719,8 +671,6 @@ s32 main() {
     mem->platform = create_stack_allocator(mem->fixed, kilobyte(2));
     mem->vulkan = create_stack_allocator(mem->fixed, megabyte(4));
     mem->graphics = create_stack_allocator(mem->fixed, megabyte(4));
-
-    // job_test(fixed_mem);
 
     // Create Modules
     Platform *platform = create_platform(mem->platform, {
