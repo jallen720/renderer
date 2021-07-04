@@ -21,7 +21,7 @@ struct WindowInfo {
         s32 height;
     } surface;
 
-    wchar_t const *title;
+    const wchar_t *title;
 };
 
 struct Window {
@@ -116,8 +116,8 @@ static LRESULT CALLBACK window_callback(_In_ HWND hwnd, _In_ UINT msg, _In_ WPAR
 }
 
 static void create_window(Platform *platform, WindowInfo info) {
-    static wchar_t const *CLASS_NAME = L"win32_window";
-    static DWORD const WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
+    static constexpr const wchar_t *CLASS_NAME = L"win32_window";
+    static constexpr DWORD WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
 
     // Calculate window rect based on surface rect.
     RECT window_rect = {
@@ -159,6 +159,9 @@ static void create_window(Platform *platform, WindowInfo info) {
 static Platform *create_platform(Allocator *module_mem, WindowInfo window_info) {
     if (instance)
         CTK_FATAL("a Platform instance has already been created");
+
+    // Make win32 process DPI aware so windows scale properly.
+    SetProcessDPIAware();
 
     auto platform = allocate<Platform>(module_mem, 1);
     platform->module_mem = module_mem;

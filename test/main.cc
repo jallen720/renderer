@@ -309,7 +309,9 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
     test->input.last_mouse_position = get_mouse_position(platform);
     create_entities(test);
     test->frame_benchmark = create_frame_benchmark(mem->fixed, 64);
-    test->render_task = create_range_task(mem->fixed, platform->thread_count);
+    test->render_task = allocate<RangeTask>(mem->fixed, 1);
+    test->render_task->thread_count = platform->thread_count;
+    // test->render_task = create_range_task(mem->fixed, platform->thread_count);
 
     return test;
 }
@@ -488,6 +490,37 @@ static DWORD record_render_cmds(void *data) {
     return 0;
 }
 
+static void record_render_cmd_bufs(Test *test, Graphics *gfx, Vulkan *vk) {
+start_benchmark(test->frame_benchmark, "record_render_cmd_bufs()");
+    // process(test->render_task, record_render_cmds, test->entities.count, &s);
+    FixedArray<RecordRenderCmdsState, 64> states = {};
+    FixedArray<HANDLE, 64> hnds = {};
+
+    // From task.h
+    u32 thread_data_start = 0;
+    u32 remaining_data = test->entities.count;
+
+    for (u32 i = 0; i < test->render_task->thread_count; ++i) {
+        u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
+
+        if (thread_data_size == 0)
+            continue;
+
+        RecordRenderCmdsState *s = push(&states, { test, gfx, vk, i, { thread_data_start, thread_data_size } });
+        push(&hnds, CreateThread(NULL, 0, record_render_cmds, s, 0, NULL));
+        // record_render_cmds(s);
+
+        remaining_data -= thread_data_size;
+        thread_data_start += thread_data_size;
+    }
+
+    WaitForMultipleObjects(hnds.count, hnds.data, TRUE, INFINITE);
+
+    for (u32 i = 0; i < hnds.count; ++i)
+        CloseHandle(hnds.data[i]);
+end_benchmark(test->frame_benchmark);
+}
+
 static void record_render_pass(Test *test, Graphics *gfx, Vulkan *vk) {
     VkCommandBuffer primary_cmd_buf = gfx->primary_render_cmd_bufs->data[gfx->sync.swap_img_idx];
 
@@ -510,34 +543,6 @@ static void record_render_pass(Test *test, Graphics *gfx, Vulkan *vk) {
     };
     vkCmdBeginRenderPass(primary_cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
-start_benchmark(test->frame_benchmark, "process(record_render_cmds())");
-    // process(test->render_task, record_render_cmds, test->entities.count, &s);
-    FixedArray<RecordRenderCmdsState, 64> states = {};
-    FixedArray<HANDLE, 64> hnds = {};
-
-    // From task.h
-    u32 thread_data_start = 0;
-    u32 remaining_data = test->entities.count;
-
-    for (u32 i = 0; i < test->render_task->thread_count; ++i) {
-        u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
-
-        if (thread_data_size == 0)
-            continue;
-
-        RecordRenderCmdsState *s = push(&states, { test, gfx, vk, i, { thread_data_start, thread_data_size } });
-        push(&hnds, CreateThread(NULL, 0, record_render_cmds, s, 0, NULL));
-
-        remaining_data -= thread_data_size;
-        thread_data_start += thread_data_size;
-    }
-
-    WaitForMultipleObjects(hnds.count, hnds.data, TRUE, INFINITE);
-
-    for (u32 i = 0; i < hnds.count; ++i)
-        CloseHandle(hnds.data[i]);
-end_benchmark(test->frame_benchmark);
-
     FixedArray<VkCommandBuffer, 64> secondary_cmd_bufs = {};
     for (u32 i = 0; i < test->render_task->thread_count; ++i)
         push(&secondary_cmd_bufs, gfx->secondary_render_cmd_bufs->data[i]->data[gfx->sync.swap_img_idx]);
@@ -553,6 +558,7 @@ static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     // Update uniform buffer data.
     Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
     update_entity_matrixes(test, view_space_matrix);
+    record_render_cmd_bufs(test, gfx, vk);
     record_render_pass(test, gfx, vk);
 
     // Write to uniform buffers.
@@ -584,13 +590,15 @@ s32 main() {
     // Create Modules
     Platform *platform = create_platform(mem->platform, {
         .surface = {
-            .x = 600,
+            .x = 0,
             .y = 100,
-            .width = 1920,
-            .height = 1080,
+            .width = 1600,
+            .height = 900,
         },
         .title = L"Renderer",
     });
+
+    SetWindowPos(platform->window->handle, HWND_TOPMOST, GetSystemMetrics(SM_CXSCREEN) - 1600, 100, 0, 0, SWP_NOSIZE);
 
     Vulkan *vk = create_vulkan(mem->vulkan, platform, {
         .max_buffers = 2,
