@@ -49,7 +49,8 @@ struct Entity {
 };
 
 struct Test {
-    static constexpr u32 MAX_ENTITIES = 110592;
+    static constexpr u32 CUBE_MATRIX_SIZE = 48;
+    static constexpr u32 MAX_ENTITIES = 48 * 48 * 48;
 
     struct {
         Mesh quad;
@@ -275,9 +276,9 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_entities(Test *test) {
-    for (s32 z = 0; z < 48; ++z)
-    for (s32 y = 0; y < 48; ++y)
-    for (s32 x = 0; x < 48; ++x) {
+    for (s32 z = 0; z < Test::CUBE_MATRIX_SIZE; ++z)
+    for (s32 y = 0; y < Test::CUBE_MATRIX_SIZE; ++y)
+    for (s32 x = 0; x < Test::CUBE_MATRIX_SIZE; ++x) {
         push(&test->entities, {
             .position = { x * 2.5f, -y * 2.5f, z * 2.5f },
             .rotation = { 0, 0, 0 },
@@ -610,12 +611,13 @@ s32 main() {
 start_benchmark(test->frame_benchmark, "frame");
         process_events(platform->window);
 
-        if (!window_is_active(platform->window))
-            goto loop_end;
-
         // Quit event closed the window.
         if (!platform->window->open)
             break;
+
+        // If window is open but not active (focused), skip frame processing.
+        if (!window_is_active(platform->window))
+            goto loop_end;
 
         handle_input(test, platform, vk);
 
