@@ -221,7 +221,6 @@ struct Vulkan {
     } queue;
 
     Swapchain swapchain;
-    VkCommandPool cmd_pool;
 };
 
 ////////////////////////////////////////////////////////////
@@ -664,13 +663,16 @@ static void init_swapchain(Vulkan *vk) {
     pop_frame(vk->mem.temp);
 }
 
-static void init_cmd_pool(Vulkan *vk) {
-    VkCommandPoolCreateInfo command_pool_info = {};
-    command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    command_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    command_pool_info.queueFamilyIndex = vk->physical_device.queue_family_idxs.graphics;
-    validate_result(vkCreateCommandPool(vk->device, &command_pool_info, NULL, &vk->cmd_pool),
-                    "failed to create command pool");
+static VkCommandPool create_cmd_pool(Vulkan *vk) {
+    VkCommandPoolCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    info.queueFamilyIndex = vk->physical_device.queue_family_idxs.graphics;
+
+    VkCommandPool cmd_pool = VK_NULL_HANDLE;
+    validate_result(vkCreateCommandPool(vk->device, &info, NULL, &cmd_pool), "failed to create command pool");
+
+    return cmd_pool;
 }
 
 static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanInfo info) {
@@ -696,7 +698,6 @@ static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanIn
     init_queues(vk);
 
     init_swapchain(vk);
-    init_cmd_pool(vk);
 
     return vk;
 }
@@ -1354,18 +1355,15 @@ static VkFence create_fence(Vulkan *vk) {
     return fence;
 }
 
-static void alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count, VkCommandBuffer *cmd_bufs) {
-    VkCommandBufferAllocateInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    info.commandPool = vk->cmd_pool;
-    info.level = level;
-    info.commandBufferCount = count;
+static void allocate_cmd_bufs(Vulkan *vk, VkCommandBuffer *cmd_bufs, VkCommandBufferAllocateInfo info) {
     validate_result(vkAllocateCommandBuffers(vk->device, &info, cmd_bufs), "failed to allocate command buffer");
 }
 
-static Array<VkCommandBuffer> *alloc_cmd_bufs(Vulkan *vk, VkCommandBufferLevel level, u32 count) {
-    auto cmd_bufs = create_array_full<VkCommandBuffer>(vk->mem.module, count);
-    alloc_cmd_bufs(vk, level, count, cmd_bufs->data);
+static Array<VkCommandBuffer> *create_cmd_buf_array(Vulkan *vk, Allocator *allocator,
+                                                    VkCommandBufferAllocateInfo info)
+{
+    auto cmd_bufs = create_array_full<VkCommandBuffer>(allocator, info.commandBufferCount);
+    allocate_cmd_bufs(vk, cmd_bufs->data, info);
     return cmd_bufs;
 }
 

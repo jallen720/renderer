@@ -26,6 +26,7 @@ struct Graphics {
         Allocator *temp;
     } mem;
 
+    VkCommandPool main_cmd_pool;
     VkCommandBuffer temp_cmd_buf;
 
     struct {
@@ -63,10 +64,11 @@ struct Graphics {
         Pipeline *entity;
     } pipeline;
 
-    struct {
-        Array<VkFramebuffer> *framebuffers;
-        Array<VkCommandBuffer> *render_cmd_bufs;
-    } swap_state;
+    Array<VkFramebuffer> *framebuffers;
+
+    Array<VkCommandBuffer> *primary_render_cmd_bufs;
+    Array<VkCommandPool> *secondary_render_cmd_pools;
+    Array<Array<VkCommandBuffer> *> *secondary_render_cmd_bufs;
 
     struct {
         Array<Frame> *frames;
@@ -79,6 +81,17 @@ struct Graphics {
 ////////////////////////////////////////////////////////////
 /// Internal
 ////////////////////////////////////////////////////////////
+static void create_cmd_state(Graphics *gfx, Vulkan *vk) {
+    gfx->main_cmd_pool = create_cmd_pool(vk);
+
+    allocate_cmd_bufs(vk, &gfx->temp_cmd_buf, {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = gfx->main_cmd_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    });
+}
+
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
     {
         BufferInfo info = {};
@@ -372,30 +385,52 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static void init_swap_state(Graphics *gfx, Vulkan *vk) {
-    {
-        gfx->swap_state.framebuffers = create_array<VkFramebuffer>(gfx->mem.module, vk->swapchain.image_count);
+static void create_framebuffers(Graphics *gfx, Vulkan *vk) {
+    gfx->framebuffers = create_array<VkFramebuffer>(gfx->mem.module, vk->swapchain.image_count);
 
-        // Create framebuffer for each swapchain image.
-        for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
-            push_frame(gfx->mem.temp);
+    // Create framebuffer for each swapchain image.
+    for (u32 i = 0; i < vk->swapchain.image_views.count; ++i) {
+        push_frame(gfx->mem.temp);
 
-            FramebufferInfo info = {};
+        FramebufferInfo info = {};
 
-            info.attachments = create_array<VkImageView>(gfx->mem.temp, 2),
-            push(info.attachments, gfx->framebuffer_image.depth->view);
-            push(info.attachments, vk->swapchain.image_views[i]);
+        info.attachments = create_array<VkImageView>(gfx->mem.temp, 2),
+        push(info.attachments, gfx->framebuffer_image.depth->view);
+        push(info.attachments, vk->swapchain.image_views[i]);
 
-            info.extent = get_surface_extent(vk);
-            info.layers = 1;
+        info.extent = get_surface_extent(vk);
+        info.layers = 1;
 
-            push(gfx->swap_state.framebuffers, create_framebuffer(vk->device, gfx->main_render_pass->handle, &info));
+        push(gfx->framebuffers, create_framebuffer(vk->device, gfx->main_render_pass->handle, &info));
 
-            pop_frame(gfx->mem.temp);
-        }
+        pop_frame(gfx->mem.temp);
     }
+}
 
-    gfx->swap_state.render_cmd_bufs = alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, vk->swapchain.image_count);
+static void create_render_cmd_state(Graphics *gfx, Vulkan *vk, Platform *platform) {
+    gfx->primary_render_cmd_bufs = create_cmd_buf_array(vk, gfx->mem.module, {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = gfx->main_cmd_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = vk->swapchain.image_count,
+    });
+
+    gfx->secondary_render_cmd_pools = create_array_full<VkCommandPool>(gfx->mem.module, platform->thread_count);
+    gfx->secondary_render_cmd_bufs =
+        create_array_full<Array<VkCommandBuffer> *>(gfx->mem.module, platform->thread_count);
+
+    // Create command pools and command buffer arrays for each thread.
+    for (u32 thread_index = 0; thread_index < platform->thread_count; ++thread_index) {
+        gfx->secondary_render_cmd_pools->data[thread_index] = create_cmd_pool(vk);
+
+        // Allocate command buffers for this thread for each swapchain image.
+        gfx->secondary_render_cmd_bufs->data[thread_index] = create_cmd_buf_array(vk, gfx->mem.module, {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = gfx->secondary_render_cmd_pools->data[thread_index],
+            .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
+            .commandBufferCount = vk->swapchain.image_count,
+        });
+    }
 }
 
 static void init_sync(Graphics *gfx, Vulkan *vk, u32 frame_count) {
@@ -414,12 +449,12 @@ static void init_sync(Graphics *gfx, Vulkan *vk, u32 frame_count) {
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk) {
+static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk, Platform *platform) {
     Graphics *gfx = allocate<Graphics>(module_mem, 1);
     gfx->mem.module = module_mem;
     gfx->mem.temp = create_stack_allocator(module_mem, megabyte(1));
 
-    alloc_cmd_bufs(vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1, &gfx->temp_cmd_buf);
+    create_cmd_state(gfx, vk);
     create_buffers(gfx, vk);
     gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64), 16);
     create_samplers(gfx, vk);
@@ -428,8 +463,8 @@ static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk) {
     create_render_passes(gfx, vk);
     create_framebuffer_images(gfx, vk);
     create_pipelines(gfx, vk);
-
-    init_swap_state(gfx, vk);
+    create_framebuffers(gfx, vk);
+    create_render_cmd_state(gfx, vk, platform);
     init_sync(gfx, vk, 1);
 
     return gfx;
@@ -461,7 +496,7 @@ static void submit_render_cmds(Graphics *gfx, Vulkan *vk) {
         submit_info.pWaitSemaphores = &gfx->sync.frame->img_aquired;
         submit_info.pWaitDstStageMask = &wait_stage;
         submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &gfx->swap_state.render_cmd_bufs->data[gfx->sync.swap_img_idx];
+        submit_info.pCommandBuffers = &gfx->primary_render_cmd_bufs->data[gfx->sync.swap_img_idx];
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = &gfx->sync.frame->render_finished;
 
