@@ -8,115 +8,11 @@
 #include "ctk/memory.h"
 #include "ctk/containers.h"
 #include "ctk/math.h"
+#include "ctk/benchmark.h"
 
 #include "renderer/test/glm_test.h"
 
 using namespace ctk;
-
-////////////////////////////////////////////////////////////
-/// Benchmarking
-////////////////////////////////////////////////////////////
-struct Benchmark {
-    cstr name;
-    clock_t start;
-    Benchmark *parent;
-    Benchmark *children;
-    Benchmark *next;
-    f64 ms;
-};
-
-struct FrameBenchmark {
-    Stack *mem;
-    Benchmark *current;
-    Benchmark *root;
-};
-
-static void reset_frame_benchmark(FrameBenchmark *fb) {
-    fb->mem->count = 0;
-    fb->current = NULL;
-}
-
-static FrameBenchmark *create_frame_benchmark(Allocator *mem, u32 max_benchmarks) {
-    auto fb = allocate<FrameBenchmark>(mem, 1);
-    fb->mem = create_stack(mem, sizeof(Benchmark) * max_benchmarks);
-    return fb;
-}
-
-static void push_benchmark(Benchmark *parent, Benchmark *bm) {
-    Benchmark *end = parent->children;
-
-    if (end == NULL) {
-        parent->children = bm;
-        return;
-    }
-
-    while (end->next)
-        end = end->next;
-
-    end->next = bm;
-}
-
-static void start_benchmark(FrameBenchmark *fb, cstr name) {
-    auto bm = allocate<Benchmark>(fb->mem, 1);
-    bm->name = name;
-    bm->start = clock();
-    bm->parent = fb->current;
-
-    // Adding as child to current benchmark.
-    if (fb->current != NULL)
-        push_benchmark(fb->current, bm);
-    // This is the first benchmark, set as root.
-    else
-        fb->root = bm;
-
-    fb->current = bm;
-}
-
-static f64 clocks_to_ms(clock_t start, clock_t end) {
-    return ((f64)end - start) / (CLOCKS_PER_SEC / 1000.0);
-}
-
-static void end_benchmark(FrameBenchmark *fb) {
-    clock_t end = clock();
-    fb->current->ms = clocks_to_ms(fb->current->start, end);
-    fb->current = fb->current->parent;
-}
-
-static void print_frame_benchmark(FrameBenchmark *fb) {
-    Benchmark *parent = NULL;
-    Benchmark *bm = fb->root;
-    u32 tab = 0;
-
-    while (bm) {
-        print_line(tab, "%s: %fms", bm->name, bm->ms);
-
-        // Benchmark has children, print those before going to next benchmark.
-        if (bm->children) {
-            parent = bm;
-            bm = bm->children;
-            ++tab;
-        }
-        // Done printing benchmark and its children, go to next benchmark.
-        else if (bm->next) {
-            bm = bm->next;
-        }
-        // Benchmark is end of parent children.
-        else {
-            // Walk up tree to parent with next benchmark.
-            while (parent && parent->next == NULL)
-                parent = parent->parent;
-
-            if (parent) {
-                bm = parent->next;
-                parent = parent->parent;
-                --tab;
-            }
-            else {
-                bm = NULL;
-            }
-        }
-    }
-}
 
 ////////////////////////////////////////////////////////////
 /// Data
