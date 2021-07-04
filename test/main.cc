@@ -49,7 +49,7 @@ struct Entity {
 };
 
 struct Test {
-    static constexpr u32 MAX_ENTITIES = 6400;
+    static constexpr u32 MAX_ENTITIES = 110592;
 
     struct {
         Mesh quad;
@@ -274,11 +274,11 @@ static void bind_descriptor_data(Test *test, Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_entities(Test *test) {
-    for (s32 z = 0; z < 16; ++z)
-    for (s32 y = 0; y < 16; ++y)
-    for (s32 x = 0; x < 16; ++x) {
+    for (s32 z = 0; z < 48; ++z)
+    for (s32 y = 0; y < 48; ++y)
+    for (s32 x = 0; x < 48; ++x) {
         push(&test->entities, {
-            .position = { (f32)x * 3, (f32)-y * 3, (f32)z * 3 },
+            .position = { x * 2.5f, -y * 2.5f, z * 2.5f },
             .rotation = { 0, 0, 0 },
         });
     }
@@ -297,9 +297,9 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
             .vertical_fov = 90,
             .aspect = (f32)vk->swapchain.extent.width / vk->swapchain.extent.height,
             .z_near = 0.1f,
-            .z_far = 100,
+            .z_far = 1000,
         },
-        .position = { 0, 0, -2 },
+        .position = { 24 * 2.5f, -24 * 2.5f, -24 * 2.5f },
         .rotation = { 0, 0, 0 },
         .max_x_angle = 89,
     };
@@ -348,7 +348,7 @@ static void update_mouse_delta(Test *test, Platform *platform, Vulkan *vk) {
 static void camera_controls(Test *test, Platform *platform) {
     // Translation
     static constexpr f32 TRANSLATION_SPEED = 0.05f;
-    f32 mod = key_down(platform, Key::SHIFT) ? 2 : 1;
+    f32 mod = key_down(platform, Key::SHIFT) ? 32 : 1;
     Vec3<f32> move_vec = {};
 
     if (key_down(platform, Key::D)) move_vec.x += TRANSLATION_SPEED * mod;
@@ -535,7 +535,7 @@ start_benchmark(test->frame_benchmark, "frame");
         process_events(platform->window);
 
         if (!window_is_active(platform->window))
-            continue;
+            goto loop_end;
 
         // Quit event closed the window.
         if (!platform->window->open)
@@ -552,12 +552,13 @@ start_benchmark(test->frame_benchmark, "frame");
         update(test, gfx, vk);
         submit_render_cmds(gfx, vk);
 
+loop_end:
         // Update FPS display.
         clock_t end = clock();
         f64 frame_ms = clocks_to_ms(start, end);
-        if (frame_ms >= 500.0) {
+        if (frame_ms >= 1000.0) {
             char buf[128] = {};
-            sprintf(buf, "%.2f FPS", (frames / (frame_ms / 500)) * 2);
+            sprintf(buf, "%.2f FPS", (f64)frames * (frame_ms / 1000.0));
             set_window_title(platform->window, buf);
             start = end;
             frames = 0;

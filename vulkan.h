@@ -1107,10 +1107,6 @@ static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set,
     pop_frame(vk->mem.temp);
 }
 
-// static void update_descriptor_set(Vulkan *vk, VkDescriptorSet descriptor_set, Array<Descriptor *> *descriptors) {
-//     return update_descriptor_set(vk, descriptor_set, descriptors->data, descriptors->count);
-// }
-
 static constexpr PipelineInfo DEFAULT_PIPELINE_INFO = {
     .input_assembly = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
