@@ -9,8 +9,7 @@
 #include "ctk/containers.h"
 #include "ctk/math.h"
 #include "ctk/benchmark.h"
-
-#include "renderer/test/glm_test.h"
+#include "ctk/task.h"
 
 using namespace ctk;
 
@@ -26,7 +25,7 @@ struct Memory {
 };
 
 struct Vertex {
-    test::Vec3 position;
+    Vec3<f32> position;
     Vec2<f32> uv;
 };
 
@@ -39,14 +38,14 @@ struct Mesh {
 
 struct View {
     PerspectiveInfo perspective_info;
-    test::Vec3 position;
-    test::Vec3 rotation;
+    Vec3<f32> position;
+    Vec3<f32> rotation;
     f32 max_x_angle;
 };
 
 struct Entity {
-    test::Vec3 position;
-    test::Vec3 rotation;
+    Vec3<f32> position;
+    Vec3<f32> rotation;
 };
 
 struct Test {
@@ -77,7 +76,7 @@ struct Test {
     } input;
 
     FixedArray<Entity, MAX_ENTITIES> entities;
-    FixedArray<test::Matrix, MAX_ENTITIES> entity_matrixes;
+    FixedArray<Matrix, MAX_ENTITIES> entity_matrixes;
 
     FrameBenchmark *frame_benchmark;
 };
@@ -238,14 +237,14 @@ static void create_images(Test *test, Graphics *gfx, Vulkan *vk) {
 static void create_uniform_buffers(Test *test, Memory *mem, Graphics *gfx, Vulkan *vk) {
     test->uniform_buffer.view_space_matrix = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
     for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-        u32 element_size = multiple_of(sizeof(test::Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
+        u32 element_size = multiple_of(sizeof(Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
         test->uniform_buffer.view_space_matrix->data[i] =
             allocate_uniform_buffer_region(vk, gfx->buffer.device, element_size);
     }
 
     test->uniform_buffer.entity_matrixes = create_array<Region *>(mem->fixed, vk->swapchain.image_count);
     for (u32 i = 0; i < vk->swapchain.image_count; ++i) {
-        u32 element_size = multiple_of(sizeof(test::Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
+        u32 element_size = multiple_of(sizeof(Matrix), vk->physical_device.min_uniform_buffer_offset_alignment);
         test->uniform_buffer.entity_matrixes->data[i] =
             allocate_uniform_buffer_region(vk, gfx->buffer.device, element_size * Test::MAX_ENTITIES);
     }
@@ -350,7 +349,7 @@ static void camera_controls(Test *test, Platform *platform) {
     // Translation
     static constexpr f32 TRANSLATION_SPEED = 0.05f;
     f32 mod = key_down(platform, Key::SHIFT) ? 2 : 1;
-    test::Vec3 move_vec = {};
+    Vec3<f32> move_vec = {};
 
     if (key_down(platform, Key::D)) move_vec.x += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::A)) move_vec.x -= TRANSLATION_SPEED * mod;
@@ -359,12 +358,12 @@ static void camera_controls(Test *test, Platform *platform) {
     if (key_down(platform, Key::W)) move_vec.z += TRANSLATION_SPEED * mod;
     if (key_down(platform, Key::S)) move_vec.z -= TRANSLATION_SPEED * mod;
 
-    test::Matrix model_matrix = test::default_matrix();
-    model_matrix = test::rotate(model_matrix, test->view.rotation.x, Axis::X);
-    model_matrix = test::rotate(model_matrix, test->view.rotation.y, Axis::Y);
-    model_matrix = test::rotate(model_matrix, test->view.rotation.z, Axis::Z);
-    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    test::Vec3 right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
+    Matrix model_matrix = MATRIX_ID;
+    model_matrix = rotate(model_matrix, test->view.rotation.x, Axis::X);
+    model_matrix = rotate(model_matrix, test->view.rotation.y, Axis::Y);
+    model_matrix = rotate(model_matrix, test->view.rotation.z, Axis::Z);
+    Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    Vec3<f32> right = { model_matrix[0][0], model_matrix[1][0], model_matrix[2][0] };
     test->view.position += move_vec.z * forward;
     test->view.position += move_vec.x * right;
     test->view.position.y += move_vec.y;
@@ -387,37 +386,34 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
-         if (key_down(platform, Key::F1)) { print_line("using glm"); use_glm = true; }
-    else if (key_down(platform, Key::F2)) { print_line("using ctk"); use_glm = false; }
-
     //      if (key_down(platform, Key::NUM_1)) { print_line("single thread"); use_threads = false; }
     // else if (key_down(platform, Key::NUM_2)) { print_line("multi thread"); use_threads = true; }
 }
 
-static test::Matrix calculate_view_space_matrix(View *view) {
-    // View test::Matrix
-    test::Matrix model_matrix = test::default_matrix();
-    model_matrix = test::rotate(model_matrix, view->rotation.x, Axis::X);
-    model_matrix = test::rotate(model_matrix, view->rotation.y, Axis::Y);
-    model_matrix = test::rotate(model_matrix, view->rotation.z, Axis::Z);
-    test::Vec3 forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
-    test::Matrix view_matrix = test::look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
+static Matrix calculate_view_space_matrix(View *view) {
+    // View Matrix
+    Matrix model_matrix = MATRIX_ID;
+    model_matrix = rotate(model_matrix, view->rotation.x, Axis::X);
+    model_matrix = rotate(model_matrix, view->rotation.y, Axis::Y);
+    model_matrix = rotate(model_matrix, view->rotation.z, Axis::Z);
+    Vec3<f32> forward = { model_matrix[0][2], model_matrix[1][2], model_matrix[2][2] };
+    Matrix view_matrix = look_at(view->position, view->position + forward, { 0.0f, -1.0f, 0.0f });
 
-    // Projection test::Matrix
-    test::Matrix projection_matrix = test::perspective_matrix(view->perspective_info);
+    // Projection Matrix
+    Matrix projection_matrix = perspective_matrix(view->perspective_info);
     projection_matrix[1][1] *= -1; // Flip y value for scale (glm is designed for OpenGL).
 
     return projection_matrix * view_matrix;
 }
 
-static void update_entity_matrixes(Test *test, test::Matrix view_space_matrix) {
+static void update_entity_matrixes(Test *test, Matrix view_space_matrix) {
     for (u32 i = 0; i < test->entities.count; ++i) {
         Entity *entity = test->entities.data + i;
 
-        test::Matrix m = test::translate(test::default_matrix(), entity->position);
-        m = test::rotate(m, entity->rotation.x, Axis::X);
-        m = test::rotate(m, entity->rotation.y, Axis::Y);
-        m = test::rotate(m, entity->rotation.z, Axis::Z);
+        Matrix m = translate(MATRIX_ID, entity->position);
+        m = rotate(m, entity->rotation.x, Axis::X);
+        m = rotate(m, entity->rotation.y, Axis::Y);
+        m = rotate(m, entity->rotation.z, Axis::Z);
 
         test->entity_matrixes.data[i] = view_space_matrix * m;
     }
@@ -471,7 +467,7 @@ static void record_render_cmds(Test *test, Graphics *gfx, Vulkan *vk) {
 
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     // Update uniform buffer data.
-    test::Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
+    Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
 start_benchmark(test->frame_benchmark, "update_entity_matrixes()");
     update_entity_matrixes(test, view_space_matrix);
 end_benchmark(test->frame_benchmark);
