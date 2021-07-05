@@ -49,8 +49,9 @@ struct Entity {
 };
 
 struct Test {
-    static constexpr u32 CUBE_MATRIX_SIZE = 48;
-    static constexpr u32 MAX_ENTITIES = 48 * 48 * 48;
+    static constexpr s32 CUBE_MATRIX_SIZE = 64;
+    static constexpr f32 CUBE_MATRIX_SPREAD = 2.5f;
+    static constexpr u32 MAX_ENTITIES = CUBE_MATRIX_SIZE * CUBE_MATRIX_SIZE * CUBE_MATRIX_SIZE;
 
     struct {
         Mesh quad;
@@ -280,7 +281,7 @@ static void create_entities(Test *test) {
     for (s32 y = 0; y < Test::CUBE_MATRIX_SIZE; ++y)
     for (s32 x = 0; x < Test::CUBE_MATRIX_SIZE; ++x) {
         push(&test->entities, {
-            .position = { x * 2.5f, -y * 2.5f, z * 2.5f },
+            .position = { x * Test::CUBE_MATRIX_SPREAD, -y * Test::CUBE_MATRIX_SPREAD, z * Test::CUBE_MATRIX_SPREAD },
             .rotation = { 0, 0, 0 },
         });
     }
@@ -301,8 +302,12 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
             .z_near = 0.1f,
             .z_far = 1000,
         },
-        .position = { 24 * 2.5f, -24 * 2.5f, -24 * 2.5f },
-        .rotation = { 0, 0, 0 },
+        .position = {
+            .x = -Test::CUBE_MATRIX_SIZE * Test::CUBE_MATRIX_SPREAD * 0.125f,
+            .y = -Test::CUBE_MATRIX_SIZE * Test::CUBE_MATRIX_SPREAD * 1.125f,
+            .z = -Test::CUBE_MATRIX_SIZE * Test::CUBE_MATRIX_SPREAD * 0.125f
+        },
+        .rotation = { 45, -45, 0 },
         .max_x_angle = 89,
     };
 
@@ -588,17 +593,19 @@ s32 main() {
     mem->graphics = create_stack_allocator(mem->fixed, megabyte(4));
 
     // Create Modules
+    static constexpr u32 WIN_WIDTH = 1600;
     Platform *platform = create_platform(mem->platform, {
         .surface = {
             .x = 0,
             .y = 100,
-            .width = 1600,
+            .width = WIN_WIDTH,
             .height = 900,
         },
         .title = L"Renderer",
     });
 
-    SetWindowPos(platform->window->handle, HWND_TOPMOST, GetSystemMetrics(SM_CXSCREEN) - 1600, 100, 0, 0, SWP_NOSIZE);
+    SetWindowPos(platform->window->handle, HWND_TOPMOST,
+                 GetSystemMetrics(SM_CXSCREEN) - WIN_WIDTH - 10, 100, 0, 0, SWP_NOSIZE);
 
     Vulkan *vk = create_vulkan(mem->vulkan, platform, {
         .max_buffers = 2,
