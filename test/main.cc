@@ -2,6 +2,8 @@
 #define STB_IMAGE_STATIC
 #include <stb/stb_image.h>
 
+#include <thread>
+#include <vector>
 #include "renderer/platform.h"
 #include "renderer/vulkan.h"
 #include "renderer/test/graphics.h"
@@ -83,6 +85,8 @@ struct Test {
     FrameBenchmark *frame_benchmark;
     RangeTask *render_task;
 };
+
+static bool use_threads;
 
 ////////////////////////////////////////////////////////////
 /// Utils
@@ -314,9 +318,7 @@ static Test *create_test(Memory *mem, Graphics *gfx, Vulkan *vk, Platform *platf
     test->input.last_mouse_position = get_mouse_position(platform);
     create_entities(test);
     test->frame_benchmark = create_frame_benchmark(mem->fixed, 64);
-    test->render_task = allocate<RangeTask>(mem->fixed, 1);
-    test->render_task->thread_count = platform->thread_count;
-    // test->render_task = create_range_task(mem->fixed, platform->thread_count);
+    test->render_task = create_range_task(mem->fixed, platform->thread_count);
 
     return test;
 }
@@ -396,8 +398,8 @@ static void handle_input(Test *test, Platform *platform, Vulkan *vk) {
     update_mouse_delta(test, platform, vk);
     camera_controls(test, platform);
 
-    //      if (key_down(platform, Key::NUM_1)) { print_line("single thread"); use_threads = false; }
-    // else if (key_down(platform, Key::NUM_2)) { print_line("multi thread"); use_threads = true; }
+         if (key_down(platform, Key::NUM_1)) { print_line("single thread"); use_threads = false; }
+    else if (key_down(platform, Key::NUM_2)) { print_line("multi thread"); use_threads = true; }
 }
 
 static Matrix calculate_view_space_matrix(View *view) {
@@ -432,18 +434,13 @@ static void update_entity_matrixes(Test *test, Matrix view_space_matrix) {
 struct RecordRenderCmdsState {
     Test *test;
     Graphics *gfx;
-    Vulkan *vk;
-    u32 thread_index;
-    Range range;
 };
 
-static DWORD record_render_cmds(void *data) {
+static void record_render_cmds(void *data, u32 thread_index, Range range) {
     auto state = (RecordRenderCmdsState *)data;
     Test *test = state->test;
     Graphics *gfx = state->gfx;
-    Vulkan *vk = state->vk;
-    u32 thread_index = state->thread_index;
-    Range range = state->range;
+    print_line("gfx: %p", gfx);
     VkCommandBuffer secondary_cmd_buf = gfx->secondary_render_cmd_bufs
                                            ->data[thread_index]
                                            ->data[gfx->sync.swap_img_idx];
@@ -459,8 +456,8 @@ static DWORD record_render_cmds(void *data) {
 
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmd_buf_begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT |
-                               VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+    // cmd_buf_begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT |
+    //                            VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
     cmd_buf_begin_info.pInheritanceInfo = &cmd_buf_inheritance_info;
     validate_result(vkBeginCommandBuffer(secondary_cmd_buf, &cmd_buf_begin_info),
                     "failed to begin recording command buffer");
@@ -492,37 +489,53 @@ static DWORD record_render_cmds(void *data) {
     print_line("thread %u runtime: %f", thread_index, clocks_to_ms(start, end));
 
     vkEndCommandBuffer(secondary_cmd_buf);
-    return 0;
 }
 
 static void record_render_cmd_bufs(Test *test, Graphics *gfx, Vulkan *vk) {
+    RecordRenderCmdsState s = { test, gfx };
+
 start_benchmark(test->frame_benchmark, "record_render_cmd_bufs()");
-    // process(test->render_task, record_render_cmds, test->entities.count, &s);
-    FixedArray<RecordRenderCmdsState, 64> states = {};
-    FixedArray<HANDLE, 64> hnds = {};
+    if (use_threads) {
+        process(test->render_task, record_render_cmds, test->entities.count, &s);
+        // FixedArray<Range, 12> ranges = {};
 
-    // From task.h
-    u32 thread_data_start = 0;
-    u32 remaining_data = test->entities.count;
+        // u32 thread_data_start = 0;
+        // u32 remaining_data = test->entities.count;
 
-    for (u32 i = 0; i < test->render_task->thread_count; ++i) {
-        u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
+        // for (u32 i = 0; i < test->render_task->thread_count; ++i) {
+        //     u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
 
-        if (thread_data_size == 0)
-            continue;
+        //     if (thread_data_size == 0)
+        //         continue;
 
-        RecordRenderCmdsState *s = push(&states, { test, gfx, vk, i, { thread_data_start, thread_data_size } });
-        push(&hnds, CreateThread(NULL, 0, record_render_cmds, s, 0, NULL));
-        // record_render_cmds(s);
+        //     push(&ranges, { thread_data_start, thread_data_size });
 
-        remaining_data -= thread_data_size;
-        thread_data_start += thread_data_size;
+        //     remaining_data -= thread_data_size;
+        //     thread_data_start += thread_data_size;
+        // }
+
+        // auto threads = std::vector<std::thread>();
+        // for (u32 i = 0; i < 12; ++i)
+        //     threads.emplace_back(record_render_cmds, (void *)&s, i, ranges.data[i]);
+        // for (u32 i = 0; i < 12; ++i)
+        //     threads[i].join();
     }
+    else {
+        u32 thread_data_start = 0;
+        u32 remaining_data = test->entities.count;
 
-    WaitForMultipleObjects(hnds.count, hnds.data, TRUE, INFINITE);
+        for (u32 i = 0; i < test->render_task->thread_count; ++i) {
+            u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
 
-    for (u32 i = 0; i < hnds.count; ++i)
-        CloseHandle(hnds.data[i]);
+            if (thread_data_size == 0)
+                continue;
+
+            record_render_cmds(&s, i, { thread_data_start, thread_data_size });
+
+            remaining_data -= thread_data_size;
+            thread_data_start += thread_data_size;
+        }
+    }
 end_benchmark(test->frame_benchmark);
 }
 
