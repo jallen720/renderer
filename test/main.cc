@@ -614,6 +614,7 @@ s32 main() {
         .max_render_passes = 2,
         .max_shaders = 16,
         .max_pipelines = 8,
+        .enable_validation = false,
     });
 
     Graphics *gfx = create_graphics(mem->graphics, vk, platform);

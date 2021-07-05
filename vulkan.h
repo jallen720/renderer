@@ -190,6 +190,7 @@ struct VulkanInfo {
     u32 max_render_passes;
     u32 max_shaders;
     u32 max_pipelines;
+    bool enable_validation;
 };
 
 struct Vulkan {
@@ -293,22 +294,24 @@ static u32 find_memory_type_index(VkPhysicalDeviceMemoryProperties mem_props, Vk
 ////////////////////////////////////////////////////////////
 /// Initialization
 ////////////////////////////////////////////////////////////
-static void init_instance(Vulkan *vk) {
+static void init_instance(Vulkan *vk, bool enable_validation) {
     Instance *instance = &vk->instance;
 
     VkDebugUtilsMessengerCreateInfoEXT debug_messenger_info = {};
-    debug_messenger_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    debug_messenger_info.pNext = NULL;
-    debug_messenger_info.flags = 0;
-    debug_messenger_info.messageSeverity = // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                           // VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-                                           VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                           VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    debug_messenger_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                                       VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                                       VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    debug_messenger_info.pfnUserCallback = debug_callback;
-    debug_messenger_info.pUserData = NULL;
+    if (enable_validation) {
+        debug_messenger_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+        debug_messenger_info.pNext = NULL;
+        debug_messenger_info.flags = 0;
+        debug_messenger_info.messageSeverity = // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                                               // VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        debug_messenger_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        debug_messenger_info.pfnUserCallback = debug_callback;
+        debug_messenger_info.pUserData = NULL;
+    }
 
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -319,31 +322,33 @@ static void init_instance(Vulkan *vk) {
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.apiVersion = VK_API_VERSION_1_0;
 
-    cstr extensions[] = {
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME, // Validation
-    };
+    FixedArray<cstr, 16> extensions = {};
+    push(&extensions, VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    push(&extensions, VK_KHR_SURFACE_EXTENSION_NAME);
+    if (enable_validation)
+        push(&extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME); // Validation
 
-    cstr layers[] = {
-        "VK_LAYER_KHRONOS_validation", // Validation
-    };
+    FixedArray<cstr, 16> layers = {};
+    if (enable_validation)
+        push(&layers, "VK_LAYER_KHRONOS_validation"); // Validation
 
     VkInstanceCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    info.pNext = &debug_messenger_info;
+    info.pNext = enable_validation ? &debug_messenger_info : NULL;
     info.flags = 0;
     info.pApplicationInfo = &app_info;
-    info.enabledLayerCount = CTK_ARRAY_SIZE(layers);
-    info.ppEnabledLayerNames = layers;
-    info.enabledExtensionCount = CTK_ARRAY_SIZE(extensions);
-    info.ppEnabledExtensionNames = extensions;
+    info.enabledLayerCount = layers.count;
+    info.ppEnabledLayerNames = layers.data;
+    info.enabledExtensionCount = extensions.count;
+    info.ppEnabledExtensionNames = extensions.data;
     validate_result(vkCreateInstance(&info, NULL, &instance->handle), "failed to create Vulkan instance");
 
-    LOAD_INSTANCE_EXTENSION_FUNCTION(instance->handle, vkCreateDebugUtilsMessengerEXT);
-    validate_result(
-        vkCreateDebugUtilsMessengerEXT(instance->handle, &debug_messenger_info, NULL, &instance->debug_messenger),
-        "failed to create debug messenger");
+    if (enable_validation) {
+        LOAD_INSTANCE_EXTENSION_FUNCTION(instance->handle, vkCreateDebugUtilsMessengerEXT);
+        validate_result(
+            vkCreateDebugUtilsMessengerEXT(instance->handle, &debug_messenger_info, NULL, &instance->debug_messenger),
+            "failed to create debug messenger");
+    }
 }
 
 static void init_surface(Vulkan *vk, Platform *platform) {
@@ -688,7 +693,7 @@ static Vulkan *create_vulkan(Allocator *module_mem, Platform *platform, VulkanIn
     vk->pool.pipeline = create_pool<Pipeline>(vk->mem.module, info.max_pipelines);
 
     // Initialization
-    init_instance(vk);
+    init_instance(vk, info.enable_validation);
     init_surface(vk, platform);
 
     // Physical/Logical Devices
