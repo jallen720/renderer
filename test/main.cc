@@ -436,14 +436,12 @@ struct RecordRenderCmdsState {
     Graphics *gfx;
 };
 
-static void record_render_cmds(void *data, u32 thread_index, Range range) {
+static void record_render_cmds(void *data, u32 thread_idx, Range range) {
     auto state = (RecordRenderCmdsState *)data;
     Test *test = state->test;
     Graphics *gfx = state->gfx;
-    print_line("gfx: %p", gfx);
-    VkCommandBuffer secondary_cmd_buf = gfx->secondary_render_cmd_bufs
-                                           ->data[thread_index]
-                                           ->data[gfx->sync.swap_img_idx];
+    print_line("running thread %u with gfx: %p", thread_idx, gfx);
+    VkCommandBuffer cmd_buf = gfx->render_cmd_bufs->data[gfx->sync.swap_img_idx]->data[thread_idx];
 
     VkCommandBufferInheritanceInfo cmd_buf_inheritance_info = {};
     cmd_buf_inheritance_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
@@ -456,39 +454,38 @@ static void record_render_cmds(void *data, u32 thread_index, Range range) {
 
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    // cmd_buf_begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT |
-    //                            VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+    cmd_buf_begin_info.flags = // VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT |
+                               VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
     cmd_buf_begin_info.pInheritanceInfo = &cmd_buf_inheritance_info;
-    validate_result(vkBeginCommandBuffer(secondary_cmd_buf, &cmd_buf_begin_info),
+    validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info),
                     "failed to begin recording command buffer");
 
-    vkCmdBindPipeline(secondary_cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->handle);
+    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->handle);
 
     // Bind descriptor sets.
     VkDescriptorSet descriptor_sets[] = {
         gfx->descriptor_set.entity->data[gfx->sync.swap_img_idx],
     };
-    vkCmdBindDescriptorSets(secondary_cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
+    vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, gfx->pipeline.entity->layout,
                             0, CTK_ARRAY_SIZE(descriptor_sets), descriptor_sets,
                             0, NULL);
 
     // Bind mesh data.
     Mesh *mesh = &test->mesh.quad;
-    vkCmdBindVertexBuffers(secondary_cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle,
-                           &mesh->vertex_region->offset);
-    vkCmdBindIndexBuffer(secondary_cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset,
-                         VK_INDEX_TYPE_UINT32);
+    vkCmdBindVertexBuffers(cmd_buf, 0, 1, &mesh->vertex_region->buffer->handle, &mesh->vertex_region->offset);
+    vkCmdBindIndexBuffer(cmd_buf, mesh->index_region->buffer->handle, mesh->index_region->offset, VK_INDEX_TYPE_UINT32);
 
     clock_t start = clock();
     for (u32 i = range.start; i < range.start + range.size; ++i) {
-        vkCmdPushConstants(secondary_cmd_buf, gfx->pipeline.entity->layout, VK_SHADER_STAGE_VERTEX_BIT,
+        vkCmdPushConstants(cmd_buf, gfx->pipeline.entity->layout, VK_SHADER_STAGE_VERTEX_BIT,
                            0, 64, &test->entity_matrixes.data[i]);
-        vkCmdDrawIndexed(secondary_cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
+        vkCmdDrawIndexed(cmd_buf, mesh->indexes->count, 1, 0, 0, 0);
+        Sleep(0);
     }
     clock_t end = clock();
-    print_line("thread %u runtime: %f", thread_index, clocks_to_ms(start, end));
+    // print_line("thread %u runtime: %f", thread_idx, clocks_to_ms(start, end));
 
-    vkEndCommandBuffer(secondary_cmd_buf);
+    vkEndCommandBuffer(cmd_buf);
 }
 
 static void record_render_cmd_bufs(Test *test, Graphics *gfx, Vulkan *vk) {
@@ -496,29 +493,34 @@ static void record_render_cmd_bufs(Test *test, Graphics *gfx, Vulkan *vk) {
 
 start_benchmark(test->frame_benchmark, "record_render_cmd_bufs()");
     if (use_threads) {
+#if 0
         process(test->render_task, record_render_cmds, test->entities.count, &s);
-        // FixedArray<Range, 12> ranges = {};
+#else
+        FixedArray<Range, 12> ranges = {};
 
-        // u32 thread_data_start = 0;
-        // u32 remaining_data = test->entities.count;
+        u32 thread_data_start = 0;
+        u32 remaining_data = test->entities.count;
 
-        // for (u32 i = 0; i < test->render_task->thread_count; ++i) {
-        //     u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
+        for (u32 i = 0; i < test->render_task->thread_count; ++i) {
+            u32 thread_data_size = remaining_data / (test->render_task->thread_count - i);
 
-        //     if (thread_data_size == 0)
-        //         continue;
+            if (thread_data_size == 0)
+                continue;
 
-        //     push(&ranges, { thread_data_start, thread_data_size });
+            push(&ranges, { thread_data_start, thread_data_size });
 
-        //     remaining_data -= thread_data_size;
-        //     thread_data_start += thread_data_size;
-        // }
+            remaining_data -= thread_data_size;
+            thread_data_start += thread_data_size;
+        }
 
-        // auto threads = std::vector<std::thread>();
-        // for (u32 i = 0; i < 12; ++i)
-        //     threads.emplace_back(record_render_cmds, (void *)&s, i, ranges.data[i]);
-        // for (u32 i = 0; i < 12; ++i)
-        //     threads[i].join();
+        auto threads = std::vector<std::thread>();
+        for (u32 i = 0; i < 12; ++i) {
+            print_line("starting thread %u with gfx: %p", i, s.gfx);
+            threads.emplace_back(record_render_cmds, (void *)&s, i, ranges.data[i]);
+        }
+        for (u32 i = 0; i < 12; ++i)
+            threads[i].join();
+#endif
     }
     else {
         u32 thread_data_start = 0;
@@ -540,13 +542,13 @@ end_benchmark(test->frame_benchmark);
 }
 
 static void record_render_pass(Test *test, Graphics *gfx, Vulkan *vk) {
-    VkCommandBuffer primary_cmd_buf = gfx->primary_render_cmd_bufs->data[gfx->sync.swap_img_idx];
+    VkCommandBuffer cmd_buf = gfx->render_pass_cmd_bufs->data[gfx->sync.swap_img_idx];
 
     VkCommandBufferBeginInfo cmd_buf_begin_info = {};
     cmd_buf_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cmd_buf_begin_info.flags = 0;
     cmd_buf_begin_info.pInheritanceInfo = NULL;
-    validate_result(vkBeginCommandBuffer(primary_cmd_buf, &cmd_buf_begin_info),
+    validate_result(vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info),
                     "failed to begin recording command buffer");
 
     VkRenderPassBeginInfo rp_begin_info = {};
@@ -559,24 +561,21 @@ static void record_render_pass(Test *test, Graphics *gfx, Vulkan *vk) {
         .offset = { 0, 0 },
         .extent = vk->swapchain.extent,
     };
-    vkCmdBeginRenderPass(primary_cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+    vkCmdBeginRenderPass(cmd_buf, &rp_begin_info, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
-    FixedArray<VkCommandBuffer, 64> secondary_cmd_bufs = {};
-    for (u32 i = 0; i < test->render_task->thread_count; ++i)
-        push(&secondary_cmd_bufs, gfx->secondary_render_cmd_bufs->data[i]->data[gfx->sync.swap_img_idx]);
+    record_render_cmd_bufs(test, gfx, vk);
+    Array<VkCommandBuffer> *render_cmd_bufs = gfx->render_cmd_bufs->data[gfx->sync.swap_img_idx];
+    vkCmdExecuteCommands(cmd_buf, render_cmd_bufs->count, render_cmd_bufs->data);
 
-    vkCmdExecuteCommands(primary_cmd_buf, secondary_cmd_bufs.count, secondary_cmd_bufs.data);
+    vkCmdEndRenderPass(cmd_buf);
 
-    vkCmdEndRenderPass(primary_cmd_buf);
-
-    vkEndCommandBuffer(primary_cmd_buf);
+    vkEndCommandBuffer(cmd_buf);
 }
 
 static void update(Test *test, Graphics *gfx, Vulkan *vk) {
     // Update uniform buffer data.
     Matrix view_space_matrix = calculate_view_space_matrix(&test->view);
     update_entity_matrixes(test, view_space_matrix);
-    record_render_cmd_bufs(test, gfx, vk);
     record_render_pass(test, gfx, vk);
 
     // Write to uniform buffers.
@@ -617,7 +616,7 @@ s32 main() {
         .title = L"Renderer",
     });
 
-    SetWindowPos(platform->window->handle, HWND_TOPMOST,
+    SetWindowPos(platform->window->handle, HWND_TOP,
                  GetSystemMetrics(SM_CXSCREEN) - WIN_WIDTH - 10, 100, 0, 0, SWP_NOSIZE);
 
     Vulkan *vk = create_vulkan(mem->vulkan, platform, {

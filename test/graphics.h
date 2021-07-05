@@ -66,9 +66,9 @@ struct Graphics {
 
     Array<VkFramebuffer> *framebuffers;
 
-    Array<VkCommandBuffer> *primary_render_cmd_bufs;
-    Array<VkCommandPool> *secondary_render_cmd_pools;
-    Array<Array<VkCommandBuffer> *> *secondary_render_cmd_bufs;
+    Array<VkCommandBuffer> *render_pass_cmd_bufs;
+    Array<VkCommandPool> *render_cmd_pools;
+    Array<Array<VkCommandBuffer> *> *render_cmd_bufs;
 
     struct {
         Array<Frame> *frames;
@@ -408,28 +408,45 @@ static void create_framebuffers(Graphics *gfx, Vulkan *vk) {
 }
 
 static void create_render_cmd_state(Graphics *gfx, Vulkan *vk, Platform *platform) {
-    gfx->primary_render_cmd_bufs = create_cmd_buf_array(vk, gfx->mem.module, {
+    gfx->render_pass_cmd_bufs = create_cmd_buf_array(vk, gfx->mem.module, {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = gfx->main_cmd_pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = vk->swapchain.image_count,
     });
 
-    gfx->secondary_render_cmd_pools = create_array_full<VkCommandPool>(gfx->mem.module, platform->thread_count);
-    gfx->secondary_render_cmd_bufs =
-        create_array_full<Array<VkCommandBuffer> *>(gfx->mem.module, platform->thread_count);
+    gfx->render_cmd_pools = create_array_full<VkCommandPool>(gfx->mem.module, platform->thread_count);
+    gfx->render_cmd_bufs = create_array_full<Array<VkCommandBuffer> *>(gfx->mem.module, vk->swapchain.image_count);
 
-    // Create command pools and command buffer arrays for each thread.
-    for (u32 thread_index = 0; thread_index < platform->thread_count; ++thread_index) {
-        gfx->secondary_render_cmd_pools->data[thread_index] = create_cmd_pool(vk);
+    // Create command buffer arrays for rendering to each swapchain image.
+    for (u32 swap_img_idx = 0; swap_img_idx < vk->swapchain.image_count; ++swap_img_idx) {
+        gfx->render_cmd_bufs->data[swap_img_idx] =
+            create_array_full<VkCommandBuffer>(gfx->mem.module, platform->thread_count);
+    }
+
+    // Allocate command pools for each thread and command buffers for each thread and swapchain image.
+    for (u32 thread_idx = 0; thread_idx < platform->thread_count; ++thread_idx) {
+        push_frame(gfx->mem.temp);
+
+        gfx->render_cmd_pools->data[thread_idx] = create_cmd_pool(vk);
 
         // Allocate command buffers for this thread for each swapchain image.
-        gfx->secondary_render_cmd_bufs->data[thread_index] = create_cmd_buf_array(vk, gfx->mem.module, {
+        Array<VkCommandBuffer> *thread_cmd_bufs = create_cmd_buf_array(vk, gfx->mem.temp, {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = gfx->secondary_render_cmd_pools->data[thread_index],
+            .commandPool = gfx->render_cmd_pools->data[thread_idx],
             .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY,
             .commandBufferCount = vk->swapchain.image_count,
         });
+
+        for (u32 swap_img_idx = 0; swap_img_idx < vk->swapchain.image_count; ++swap_img_idx)
+            gfx->render_cmd_bufs->data[swap_img_idx]->data[thread_idx] = thread_cmd_bufs->data[swap_img_idx];
+
+        pop_frame(gfx->mem.temp);
+    }
+
+    for (u32 swap_img_idx = 0; swap_img_idx < vk->swapchain.image_count; ++swap_img_idx)
+    for (u32 thread_idx = 0; thread_idx < platform->thread_count; ++thread_idx) {
+        print_line("swap %u thread %u: %p", swap_img_idx, thread_idx, gfx->render_cmd_bufs->data[swap_img_idx]->data[thread_idx]);
     }
 }
 
@@ -496,7 +513,7 @@ static void submit_render_cmds(Graphics *gfx, Vulkan *vk) {
         submit_info.pWaitSemaphores = &gfx->sync.frame->img_aquired;
         submit_info.pWaitDstStageMask = &wait_stage;
         submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &gfx->primary_render_cmd_bufs->data[gfx->sync.swap_img_idx];
+        submit_info.pCommandBuffers = &gfx->render_pass_cmd_bufs->data[gfx->sync.swap_img_idx];
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = &gfx->sync.frame->render_finished;
 
