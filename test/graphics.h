@@ -43,12 +43,12 @@ struct Graphics {
     VkDescriptorPool descriptor_pool;
 
     struct {
-        VkDescriptorSetLayout mvp_matrix;
+        // VkDescriptorSetLayout mvp_matrix;
         VkDescriptorSetLayout image_sampler;
     } descriptor_set_layout;
 
     struct {
-        Array<VkDescriptorSet> *mvp_matrix;
+        // Array<VkDescriptorSet> *mvp_matrix;
         Array<VkDescriptorSet> *image_sampler;
     } descriptor_set;
 
@@ -153,19 +153,19 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
         .max_descriptor_sets = 64,
     });
 
-    // Entity
-    {
-        DescriptorInfo descriptor_info = {
-            .count = 1,
-            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-        };
+    // // MVP Matrix
+    // {
+    //     DescriptorInfo descriptor_info = {
+    //         .count = 1,
+    //         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+    //         .stage = VK_SHADER_STAGE_VERTEX_BIT,
+    //     };
 
-        gfx->descriptor_set_layout.mvp_matrix = create_descriptor_set_layout(vk, &descriptor_info, 1);
-        gfx->descriptor_set.mvp_matrix = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
-        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.mvp_matrix,
-                                 vk->swapchain.image_count, gfx->descriptor_set.mvp_matrix->data);
-    }
+    //     gfx->descriptor_set_layout.mvp_matrix = create_descriptor_set_layout(vk, &descriptor_info, 1);
+    //     gfx->descriptor_set.mvp_matrix = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
+    //     allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.mvp_matrix,
+    //                              vk->swapchain.image_count, gfx->descriptor_set.mvp_matrix->data);
+    // }
 
     // Image Sampler
     {
