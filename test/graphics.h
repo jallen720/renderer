@@ -43,15 +43,17 @@ struct Graphics {
     VkDescriptorPool descriptor_pool;
 
     struct {
-        VkDescriptorSetLayout entity;
+        VkDescriptorSetLayout mvp_matrix;
+        VkDescriptorSetLayout image_sampler;
     } descriptor_set_layout;
 
     struct {
-        Array<VkDescriptorSet> *entity;
+        Array<VkDescriptorSet> *mvp_matrix;
+        Array<VkDescriptorSet> *image_sampler;
     } descriptor_set;
 
     struct {
-        ShaderGroup entity;
+        ShaderGroup test;
     } shader;
 
     RenderPass *main_render_pass;
@@ -61,7 +63,7 @@ struct Graphics {
     } framebuffer_image;
 
     struct {
-        Pipeline *entity;
+        Pipeline *test;
     } pipeline;
 
     Array<VkFramebuffer> *framebuffers;
@@ -95,7 +97,7 @@ static void create_cmd_state(Graphics *gfx, Vulkan *vk) {
 static void create_buffers(Graphics *gfx, Vulkan *vk) {
     {
         BufferInfo info = {};
-        info.size = megabyte(256);
+        info.size = megabyte(512);
         info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
         info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                            // VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -107,7 +109,7 @@ static void create_buffers(Graphics *gfx, Vulkan *vk) {
     }
     {
         BufferInfo info = {};
-        info.size = megabyte(256);
+        info.size = megabyte(512);
         info.sharing_mode = VK_SHARING_MODE_EXCLUSIVE;
         info.usage_flags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
@@ -153,25 +155,38 @@ static void create_descriptor_sets(Graphics *gfx, Vulkan *vk) {
 
     // Entity
     {
-        DescriptorInfo descriptor_infos[] = {
-            // { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT },
-            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        DescriptorInfo descriptor_info = {
+            .count = 1,
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
         };
 
-        gfx->descriptor_set_layout.entity = create_descriptor_set_layout(vk, descriptor_infos,
-                                                                         CTK_ARRAY_SIZE(descriptor_infos));
+        gfx->descriptor_set_layout.mvp_matrix = create_descriptor_set_layout(vk, &descriptor_info, 1);
+        gfx->descriptor_set.mvp_matrix = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
+        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.mvp_matrix,
+                                 vk->swapchain.image_count, gfx->descriptor_set.mvp_matrix->data);
+    }
 
-        gfx->descriptor_set.entity = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
-        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.entity,
-                                 vk->swapchain.image_count, gfx->descriptor_set.entity->data);
+    // Image Sampler
+    {
+        DescriptorInfo descriptor_info = {
+            .count = 1,
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+        };
+
+        gfx->descriptor_set_layout.image_sampler = create_descriptor_set_layout(vk, &descriptor_info, 1);
+        gfx->descriptor_set.image_sampler = create_array<VkDescriptorSet>(gfx->mem.module, vk->swapchain.image_count);
+        allocate_descriptor_sets(vk, gfx->descriptor_pool, gfx->descriptor_set_layout.image_sampler,
+                                 vk->swapchain.image_count, gfx->descriptor_set.image_sampler->data);
     }
 }
 
 static void create_shaders(Graphics *gfx, Vulkan *vk) {
     gfx->shader = {
-        .entity = {
-            .vert = create_shader(vk, "data/shaders/entity.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            .frag = create_shader(vk, "data/shaders/entity.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
+        .test = {
+            .vert = create_shader(vk, "data/shaders/test.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            .frag = create_shader(vk, "data/shaders/test.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
         },
     };
 }
@@ -336,23 +351,24 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
         .extent = surface_extent
     };
 
-    // Entity
+    // Test
     {
         push_frame(gfx->mem.temp);
 
         PipelineInfo info = DEFAULT_PIPELINE_INFO;
-        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(gfx->mem.temp, 1);
+        info.descriptor_set_layouts = create_array<VkDescriptorSetLayout>(gfx->mem.temp, 2);
         info.push_constant_ranges = create_array<VkPushConstantRange>(gfx->mem.temp, 1);
         info.vertex_bindings = create_array<VkVertexInputBindingDescription>(gfx->mem.temp, 1);
         info.vertex_attributes = create_array<VkVertexInputAttributeDescription>(gfx->mem.temp, 2);
         info.viewports = create_array<VkViewport>(gfx->mem.temp, 1);
         info.scissors = create_array<VkRect2D>(gfx->mem.temp, 1);
 
-        push(&info.shaders, gfx->shader.entity.vert);
-        push(&info.shaders, gfx->shader.entity.frag);
+        push(&info.shaders, gfx->shader.test.vert);
+        push(&info.shaders, gfx->shader.test.frag);
         push(&info.color_blend_attachments, DEFAULT_COLOR_BLEND_ATTACHMENT);
 
-        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.entity);
+        push(info.descriptor_set_layouts, gfx->descriptor_set_layout.image_sampler);
+        // push(info.descriptor_set_layouts, gfx->descriptor_set_layout.mvp_matrix);
         push(info.push_constant_ranges, {
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
             .offset = 0,
@@ -379,7 +395,7 @@ static void create_pipelines(Graphics *gfx, Vulkan *vk) {
         info.depth_stencil.depthWriteEnable = VK_TRUE;
         info.depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-        gfx->pipeline.entity = create_pipeline(vk, gfx->main_render_pass, 0, &info);
+        gfx->pipeline.test = create_pipeline(vk, gfx->main_render_pass, 0, &info);
 
         pop_frame(gfx->mem.temp);
     }
@@ -407,7 +423,7 @@ static void create_framebuffers(Graphics *gfx, Vulkan *vk) {
     }
 }
 
-static void create_render_cmd_state(Graphics *gfx, Vulkan *vk, Platform *platform) {
+static void create_render_cmd_state(Graphics *gfx, Vulkan *vk, u32 render_thread_count) {
     gfx->render_pass_cmd_bufs = create_cmd_buf_array(vk, gfx->mem.module, {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = gfx->main_cmd_pool,
@@ -415,17 +431,17 @@ static void create_render_cmd_state(Graphics *gfx, Vulkan *vk, Platform *platfor
         .commandBufferCount = vk->swapchain.image_count,
     });
 
-    gfx->render_cmd_pools = create_array_full<VkCommandPool>(gfx->mem.module, platform->thread_count);
+    gfx->render_cmd_pools = create_array_full<VkCommandPool>(gfx->mem.module, render_thread_count);
     gfx->render_cmd_bufs = create_array_full<Array<VkCommandBuffer> *>(gfx->mem.module, vk->swapchain.image_count);
 
     // Create command buffer arrays for rendering to each swapchain image.
     for (u32 swap_img_idx = 0; swap_img_idx < vk->swapchain.image_count; ++swap_img_idx) {
         gfx->render_cmd_bufs->data[swap_img_idx] =
-            create_array_full<VkCommandBuffer>(gfx->mem.module, platform->thread_count);
+            create_array_full<VkCommandBuffer>(gfx->mem.module, render_thread_count);
     }
 
     // Allocate command pools for each thread and command buffers for each thread and swapchain image.
-    for (u32 thread_idx = 0; thread_idx < platform->thread_count; ++thread_idx) {
+    for (u32 thread_idx = 0; thread_idx < render_thread_count; ++thread_idx) {
         push_frame(gfx->mem.temp);
 
         gfx->render_cmd_pools->data[thread_idx] = create_cmd_pool(vk);
@@ -442,11 +458,6 @@ static void create_render_cmd_state(Graphics *gfx, Vulkan *vk, Platform *platfor
             gfx->render_cmd_bufs->data[swap_img_idx]->data[thread_idx] = thread_cmd_bufs->data[swap_img_idx];
 
         pop_frame(gfx->mem.temp);
-    }
-
-    for (u32 swap_img_idx = 0; swap_img_idx < vk->swapchain.image_count; ++swap_img_idx)
-    for (u32 thread_idx = 0; thread_idx < platform->thread_count; ++thread_idx) {
-        print_line("swap %u thread %u: %p", swap_img_idx, thread_idx, gfx->render_cmd_bufs->data[swap_img_idx]->data[thread_idx]);
     }
 }
 
@@ -466,14 +477,15 @@ static void init_sync(Graphics *gfx, Vulkan *vk, u32 frame_count) {
 ////////////////////////////////////////////////////////////
 /// Interface
 ////////////////////////////////////////////////////////////
-static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk, Platform *platform) {
+static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk, u32 render_thread_count) {
     Graphics *gfx = allocate<Graphics>(module_mem, 1);
     gfx->mem.module = module_mem;
     gfx->mem.temp = create_stack_allocator(module_mem, megabyte(1));
 
     create_cmd_state(gfx, vk);
     create_buffers(gfx, vk);
-    gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(64), 16);
+    CTK_TODO("what should alignment be?")
+    gfx->staging_region = allocate_region(vk, gfx->buffer.host, megabyte(256), 16);
     create_samplers(gfx, vk);
     create_descriptor_sets(gfx, vk);
     create_shaders(gfx, vk);
@@ -481,7 +493,7 @@ static Graphics *create_graphics(Allocator *module_mem, Vulkan *vk, Platform *pl
     create_framebuffer_images(gfx, vk);
     create_pipelines(gfx, vk);
     create_framebuffers(gfx, vk);
-    create_render_cmd_state(gfx, vk, platform);
+    create_render_cmd_state(gfx, vk, render_thread_count);
     init_sync(gfx, vk, 1);
 
     return gfx;
