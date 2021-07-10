@@ -1044,9 +1044,8 @@ static void allocate_descriptor_sets(Vulkan *vk, VkDescriptorPool pool, VkDescri
     push_frame(vk->mem.temp);
 
     auto layouts = create_array<VkDescriptorSetLayout>(vk->mem.temp, count);
-    CTK_REPEAT(count) {
+    CTK_REPEAT(count)
         push(layouts, layout);
-    }
 
     VkDescriptorSetAllocateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
